@@ -5,7 +5,7 @@
 Visualize, navigate and lint **AWS Step Functions** definitions (ASL) directly in VS Code.
 Supports **YAML** (Serverless Framework), raw **JSON**, and **JSONata** query language.
 
-![StepLens Preview](images/preview.svg)
+![StepLens Preview](images/preview.png)
 
 ---
 
