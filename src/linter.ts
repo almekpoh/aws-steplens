@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { AslDefinition, AslItemProcessor, AslParser } from './aslParser';
+import { AslDefinition, AslParser } from './aslParser';
 
 export interface LintError {
   message: string;
@@ -384,7 +384,7 @@ export class AslLinter {
 
       // ── ProcessorConfig validation ────────────────────────────────────────
       if (state.Type === 'Map' && state.ItemProcessor) {
-        const pc = (state.ItemProcessor as any).ProcessorConfig as { Mode?: string; ExecutionType?: string } | undefined;
+        const pc = (state.ItemProcessor as { ProcessorConfig?: { Mode?: string; ExecutionType?: string } }).ProcessorConfig;
         const mode = pc?.Mode ?? 'INLINE';
         const execType = pc?.ExecutionType;
 
@@ -507,7 +507,7 @@ export class AslLinter {
       if (state.Type === 'Choice') {
         state.Choices?.forEach((c, i) => {
           if (jsonata) {
-            if ((c as any).Variable !== undefined) {
+            if ((c as Record<string, unknown>).Variable !== undefined) {
               errors.push({ message: `"${name}": Choices[${i}] utilise "Variable" (JSONPath) — en mode JSONata utilisez "Condition"`, severity: vscode.DiagnosticSeverity.Error, searchKey: name });
             }
             if (c.Condition && !/^\{%/.test(c.Condition)) {

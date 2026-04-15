@@ -175,8 +175,9 @@ export class AslParser {
 
       // Serverless Framework named wrapper  { machineName: { definition: { StartAt, States } } }
       for (const value of Object.values(raw)) {
-        if (value && typeof value === 'object' && (value as any).definition?.States) {
-          return { definition: (value as any).definition as AslDefinition, isWrapped: true };
+        const v = value as Record<string, unknown>;
+        if (v && typeof v === 'object' && (v.definition as Record<string, unknown>)?.States) {
+          return { definition: v.definition as AslDefinition, isWrapped: true };
         }
       }
 
