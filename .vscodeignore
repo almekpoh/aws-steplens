@@ -2,6 +2,12 @@
 src/**
 out/**
 
+# Tests
+test/**
+
+# Examples
+examples/**
+
 # Config / tooling
 .vscode/**
 .vscode-test/**
@@ -12,7 +18,17 @@ esbuild.js
 # Dev dependencies (esbuild bundles everything into dist/extension.js)
 node_modules/**
 
+# Webview sources (only vendor.js is needed at runtime)
+webview/vendor-entry.js
+
+# Dev / CI / tooling
+.claude/**
+.github/**
+
 # Misc
 **/*.map
 **/*.ts
+**/*.svg
+package-lock.json
 .gitignore
+NOTES.md

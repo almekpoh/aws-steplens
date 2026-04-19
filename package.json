@@ -2,7 +2,7 @@
   "name": "aws-steplens",
   "displayName": "AWS StepLens",
   "description": "Visualize, navigate and lint AWS Step Functions definitions (ASL YAML/JSON + JSONata). Interactive graph preview, real-time linter with 30+ rules, Parallel/Map sub-graph exploration, and PNG/JPEG export.",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "galleryBanner": {
     "color": "#1a1a2e",
     "theme": "dark"
@@ -45,7 +45,6 @@
     "map"
   ],
   "activationEvents": [
-    "onStartupFinished",
     "onLanguage:yaml",
     "onLanguage:json"
   ],
@@ -111,8 +110,9 @@
     }
   },
   "scripts": {
-    "vscode:prepublish": "npm run bundle",
+    "vscode:prepublish": "npm run bundle && npm run bundle:webview",
     "bundle": "esbuild src/extension.ts --bundle --outfile=dist/extension.js --external:vscode --format=cjs --platform=node --minify",
+    "bundle:webview": "esbuild webview/vendor-entry.js --bundle --outfile=webview/vendor.js --platform=browser --minify",
     "compile": "tsc -p ./",
     "watch": "esbuild src/extension.ts --bundle --outfile=dist/extension.js --external:vscode --format=cjs --platform=node --sourcemap --watch",
     "lint": "eslint src --ext ts",
@@ -123,15 +123,17 @@
     "@types/vscode": "^1.85.0",
     "@typescript-eslint/eslint-plugin": "^6.0.0",
     "@typescript-eslint/parser": "^6.0.0",
+    "cytoscape": "^3.33.2",
+    "cytoscape-dagre": "^2.5.0",
+    "dagre": "^0.8.5",
     "esbuild": "^0.25.0",
     "eslint": "^8.0.0",
     "ts-node": "^10.9.2",
-    "typescript": "^5.3.0"
+    "typescript": "^5.3.0",
+    "yaml": "^2.4.0",
+    "@vscode/vsce": "^3.2.1"
   },
   "overrides": {
-    "minimatch": ">=9.0.7"
-  },
-  "dependencies": {
-    "yaml": "^2.4.0"
+    "minimatch": "9.0.7"
   }
 }

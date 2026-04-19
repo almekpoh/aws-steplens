@@ -163,20 +163,23 @@ export class AslParser {
 
       if (!raw || typeof raw !== 'object') return null;
 
+      const isStatesObj = (v: unknown) =>
+        v !== null && typeof v === 'object' && !Array.isArray(v);
+
       // Raw ASL  { StartAt, States }
-      if (raw.States) {
+      if (isStatesObj(raw.States)) {
         return { definition: raw as AslDefinition, isWrapped: false };
       }
 
       // Serverless Framework flat wrapper  { definition: { StartAt, States } }
-      if (raw.definition?.States) {
+      if (isStatesObj(raw.definition?.States)) {
         return { definition: raw.definition as AslDefinition, isWrapped: true };
       }
 
       // Serverless Framework named wrapper  { machineName: { definition: { StartAt, States } } }
       for (const value of Object.values(raw)) {
         const v = value as Record<string, unknown>;
-        if (v && typeof v === 'object' && (v.definition as Record<string, unknown>)?.States) {
+        if (v && typeof v === 'object' && isStatesObj((v.definition as Record<string, unknown>)?.States)) {
           return { definition: v.definition as AslDefinition, isWrapped: true };
         }
       }
@@ -207,11 +210,8 @@ export class AslParser {
       if (state.Default) stack.push(state.Default);
       state.Catch?.forEach(c => stack.push(c.Next));
       state.Choices?.forEach(c => { if (c.Next) stack.push(c.Next); });
-      // Parallel branches
-      state.Branches?.forEach(b => {
-        if (b.StartAt) stack.push(b.StartAt);
-        Object.keys(b.States ?? {}).forEach(s => stack.push(s));
-      });
+      // Note: Parallel branch and Map iterator states are sub-state-machines
+      // validated via recursive lint — they are not top-level states.
     }
 
     return visited;
@@ -250,6 +250,11 @@ export class AslParser {
       if ((state.Retry?.length ?? 0) > 0) label += ' ↺';
       if (isWaitForToken) label += ' ⏸';
       if (isHttpTask) label += ' 🌐';
+      // Fail: append Error (or Cause if no Error) as a second line
+      if (state.Type === 'Fail') {
+        const detail = state.Error ?? state.Cause;
+        if (detail) label += `\n${detail}`;
+      }
 
       nodes.push({
         id: name,
@@ -262,17 +267,22 @@ export class AslParser {
       });
     }
 
-    const hasEnd = Object.values(def.States).some(s => s.End);
+    // __END__ exists whenever any state is terminal: explicit End, Fail, or Succeed
+    const hasEnd = Object.values(def.States).some(
+      s => s.End || s.Type === 'Fail' || s.Type === 'Succeed'
+    );
     if (hasEnd) nodes.push({ id: '__END__', label: 'End', type: 'END' });
 
-    // Start edge
-    edges.push({ id: eid(), source: '__START__', target: def.StartAt, label: '', edgeType: 'normal' });
+    // Start edge — only if StartAt actually exists in States (guard against dangling edge)
+    if (def.States[def.StartAt] !== undefined) {
+      edges.push({ id: eid(), source: '__START__', target: def.StartAt, label: '', edgeType: 'normal' });
+    }
 
     for (const [name, state] of Object.entries(def.States)) {
       if (state.Next) {
         edges.push({ id: eid(), source: name, target: state.Next, label: '', edgeType: 'normal' });
       }
-      if (state.End) {
+      if (state.End || state.Type === 'Fail' || state.Type === 'Succeed') {
         edges.push({ id: eid(), source: name, target: '__END__', label: '', edgeType: 'normal' });
       }
       state.Catch?.forEach(c => {
@@ -349,61 +359,4 @@ export class AslParser {
     return result;
   }
 
-  static toMermaid(def: AslDefinition): string {
-    const safe = (s: string) => s.replace(/[^a-zA-Z0-9]/g, '_');
-    const edgeLbl = (s: string) =>
-      s.replace(/[|"<>{}[\]()]/g, '').replace(/\s+/g, ' ').trim().substring(0, 20);
-
-    const nodeLines: string[] = [];
-    const edgeLines: string[] = [];
-
-    nodeLines.push('  SFN_START(Start)');
-    edgeLines.push(`  SFN_START --> ${safe(def.StartAt)}`);
-
-    const hasEndState = Object.values(def.States).some(s => s.End);
-    if (hasEndState) nodeLines.push('  SFN_END(End)');
-
-    for (const [name, state] of Object.entries(def.States)) {
-      const id = safe(name);
-
-      switch (state.Type) {
-        case 'Choice':
-          nodeLines.push(`  ${id}{${id}}`);
-          break;
-        case 'Wait':
-          nodeLines.push(`  ${id}(${id})`);
-          break;
-        case 'Succeed':
-        case 'Fail':
-          nodeLines.push(`  ${id}((${id}))`);
-          break;
-        case 'Parallel':
-        case 'Map':
-          nodeLines.push(`  ${id}[[${id}]]`);
-          break;
-        default:
-          nodeLines.push(`  ${id}[${id}]`);
-          break;
-      }
-
-      if (state.Next) {
-        edgeLines.push(`  ${id} --> ${safe(state.Next)}`);
-      }
-      if (state.End) {
-        edgeLines.push(`  ${id} --> SFN_END`);
-      }
-      state.Catch?.forEach(c => {
-        const lbl = edgeLbl(c.ErrorEquals.join(' '));
-        edgeLines.push(`  ${id} -->|catch ${lbl}| ${safe(c.Next)}`);
-      });
-      state.Choices?.forEach((c, i) => {
-        if (c.Next) edgeLines.push(`  ${id} -->|b${i + 1}| ${safe(c.Next)}`);
-      });
-      if (state.Default) {
-        edgeLines.push(`  ${id} -->|default| ${safe(state.Default)}`);
-      }
-    }
-
-    return ['graph TD', ...nodeLines, ...edgeLines].join('\n');
-  }
 }

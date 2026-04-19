@@ -110,6 +110,38 @@ describe('AslParser.parse()', () => {
   it('returns null for invalid JSON', () => {
     assert.strictEqual(AslParser.parse('{broken', 'json'), null);
   });
+
+  it('returns null for JSON that looks like ASL but has no States', () => {
+    assert.strictEqual(
+      AslParser.parse('{"StartAt":"A","Comment":"no states here"}', 'json'),
+      null
+    );
+  });
+
+  it('returns null for JSON with States as a non-object', () => {
+    assert.strictEqual(
+      AslParser.parse('{"StartAt":"A","States":"invalid"}', 'json'),
+      null
+    );
+  });
+
+  it('returns null for empty string', () => {
+    assert.strictEqual(AslParser.parse('', 'yaml'), null);
+  });
+
+  it('parses GovCloud ARN partition in Resource without error', () => {
+    const yaml = `
+StartAt: A
+States:
+  A:
+    Type: Task
+    Resource: arn:aws-us-gov:states:::lambda:invoke
+    End: true
+`;
+    const r = AslParser.parse(yaml, 'yaml');
+    assert.ok(r);
+    assert.strictEqual(r.definition.States['A'].Resource, 'arn:aws-us-gov:states:::lambda:invoke');
+  });
 });
 
 // ── reachableStates() ────────────────────────────────────────────────────────
@@ -241,6 +273,77 @@ States:
     const g = AslParser.toGraphData(def);
     assert.ok(g.nodes.find(n => n.id === 'M')!.label.includes('⊕'));
   });
+
+  it('creates __END__ node when only Fail state exists (no explicit End: true)', () => {
+    const g = AslParser.toGraphData({
+      StartAt: 'A',
+      States: {
+        A: { Type: 'Task', Resource: 'arn', Next: 'F' },
+        F: { Type: 'Fail', Error: 'MyError', Cause: 'something went wrong' },
+      },
+    });
+    assert.ok(g.nodes.find(n => n.id === '__END__'), 'should create __END__ for Fail state');
+  });
+
+  it('creates __END__ node when only Succeed state exists (no explicit End: true)', () => {
+    const g = AslParser.toGraphData({
+      StartAt: 'A',
+      States: {
+        A: { Type: 'Task', Resource: 'arn', Next: 'S' },
+        S: { Type: 'Succeed' },
+      },
+    });
+    assert.ok(g.nodes.find(n => n.id === '__END__'), 'should create __END__ for Succeed state');
+  });
+
+  it('adds edge from Fail state to __END__', () => {
+    const g = AslParser.toGraphData({
+      StartAt: 'A',
+      States: {
+        A: { Type: 'Task', Resource: 'arn', Next: 'F' },
+        F: { Type: 'Fail' },
+      },
+    });
+    assert.ok(g.edges.find(e => e.source === 'F' && e.target === '__END__'), 'Fail → __END__ edge missing');
+  });
+
+  it('adds edge from Succeed state to __END__', () => {
+    const g = AslParser.toGraphData({
+      StartAt: 'A',
+      States: {
+        A: { Type: 'Task', Resource: 'arn', Next: 'S' },
+        S: { Type: 'Succeed' },
+      },
+    });
+    assert.ok(g.edges.find(e => e.source === 'S' && e.target === '__END__'), 'Succeed → __END__ edge missing');
+  });
+
+  it('shows Error in Fail node label', () => {
+    const g = AslParser.toGraphData({
+      StartAt: 'F',
+      States: { F: { Type: 'Fail', Error: 'OrderNotFound', Cause: 'No such order' } },
+    });
+    const node = g.nodes.find(n => n.id === 'F')!;
+    assert.ok(node.label.includes('OrderNotFound'), `label was: ${node.label}`);
+  });
+
+  it('falls back to Cause in Fail node label when Error is absent', () => {
+    const g = AslParser.toGraphData({
+      StartAt: 'F',
+      States: { F: { Type: 'Fail', Cause: 'Something exploded' } },
+    });
+    const node = g.nodes.find(n => n.id === 'F')!;
+    assert.ok(node.label.includes('Something exploded'), `label was: ${node.label}`);
+  });
+
+  it('does not create dangling start edge when StartAt is not in States', () => {
+    const g = AslParser.toGraphData({
+      StartAt: 'Missing',
+      States: { A: { Type: 'Task', Resource: 'arn', End: true } },
+    });
+    const startEdge = g.edges.find(e => e.source === '__START__');
+    assert.ok(!startEdge, `start edge should not exist when StartAt is missing from States`);
+  });
 });
 
 // ── extractSubGraphs() ───────────────────────────────────────────────────────
@@ -258,5 +361,112 @@ describe('AslParser.extractSubGraphs()', () => {
     const subs = AslParser.extractSubGraphs(def);
     assert.strictEqual(subs.length, 1);
     assert.strictEqual(subs[0].type, 'Map');
+  });
+
+  it('extracts legacy Iterator (deprecated format)', () => {
+    const yaml = `
+StartAt: M
+States:
+  M:
+    Type: Map
+    Iterator:
+      StartAt: C
+      States:
+        C: { Type: Task, Resource: arn, End: true }
+    End: true
+`;
+    const def = AslParser.parse(yaml, 'yaml')!.definition;
+    const subs = AslParser.extractSubGraphs(def);
+    assert.strictEqual(subs.length, 1);
+    assert.strictEqual(subs[0].type, 'Map');
+  });
+});
+
+// ── allStateNames() ──────────────────────────────────────────────────────────
+
+describe('AslParser.allStateNames()', () => {
+  it('returns top-level state names', () => {
+    const def = AslParser.parse(MAP_YAML, 'yaml')!.definition;
+    const names = AslParser.allStateNames(def);
+    assert.ok(names.includes('M'));
+    assert.ok(names.includes('Done'));
+  });
+
+  it('includes states from Parallel branches', () => {
+    const def = AslParser.parse(PARALLEL_YAML, 'yaml')!.definition;
+    const names = AslParser.allStateNames(def);
+    assert.ok(names.includes('Par'));
+    assert.ok(names.includes('A'));
+    assert.ok(names.includes('B'));
+  });
+
+  it('includes states from Map iterator', () => {
+    const def = AslParser.parse(MAP_YAML, 'yaml')!.definition;
+    const names = AslParser.allStateNames(def);
+    assert.ok(names.includes('Child'));
+  });
+
+  it('includes states from Map inside Parallel (deep nesting)', () => {
+    const yaml = `
+StartAt: Par
+States:
+  Par:
+    Type: Parallel
+    Branches:
+      - StartAt: M
+        States:
+          M:
+            Type: Map
+            ItemProcessor:
+              StartAt: Inner
+              States:
+                Inner: { Type: Task, Resource: arn, End: true }
+            End: true
+    End: true
+`;
+    const def = AslParser.parse(yaml, 'yaml')!.definition;
+    const names = AslParser.allStateNames(def);
+    assert.ok(names.includes('Par'));
+    assert.ok(names.includes('M'));
+    assert.ok(names.includes('Inner'));
+  });
+});
+
+// ── Serverless Framework + JSONata combination ────────────────────────────────
+
+describe('AslParser.parse() — SF wrapper + JSONata', () => {
+  it('parses SF flat wrapper with QueryLanguage: JSONata', () => {
+    const yaml = `
+definition:
+  QueryLanguage: JSONata
+  StartAt: A
+  States:
+    A:
+      Type: Task
+      Resource: arn
+      End: true
+`;
+    const r = AslParser.parse(yaml, 'yaml');
+    assert.ok(r);
+    assert.strictEqual(r.isWrapped, true);
+    assert.strictEqual(r.definition.QueryLanguage, 'JSONata');
+  });
+
+  it('parses SF named wrapper with QueryLanguage: JSONata', () => {
+    const yaml = `
+myMachine:
+  definition:
+    QueryLanguage: JSONata
+    StartAt: A
+    States:
+      A:
+        Type: Task
+        Resource: arn
+        End: true
+`;
+    const r = AslParser.parse(yaml, 'yaml');
+    assert.ok(r);
+    assert.strictEqual(r.isWrapped, true);
+    assert.strictEqual(r.definition.QueryLanguage, 'JSONata');
   });
 });

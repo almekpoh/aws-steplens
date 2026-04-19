@@ -2,6 +2,60 @@
 
 ---
 
+## [0.1.2] — 2026-04-19
+
+### Added
+
+**New linter rules**
+
+- **Task without `Resource`** — Task states must have a `Resource`; missing field now reported as an error
+- **Choice with `End` or `Next`** — these fields are forbidden at the Choice state level (transitions are expressed via `Choices[].Next` and `Default`)
+- **`Version` validation** — only `"1.0"` is accepted when the field is present
+- **`QueryLanguage` validation** — both definition-level and state-level `QueryLanguage` must be `"JSONata"` or `"JSONPath"`
+- **Global `TimeoutSeconds`** — definition-level `TimeoutSeconds` validated in range 1–99999999
+- **`Retry.IntervalSeconds` upper bound** — max 99999999 (lower bound ≥ 1 already existed)
+- **`Retry.MaxDelaySeconds`** — validated in range 1–31622400
+- **`Retry.MaxAttempts`** — must be ≥ 0
+- **`Retry.JitterStrategy`** — must be `"FULL"` or `"NONE"`
+- **`TimeoutSeconds` / `HeartbeatSeconds` upper bounds** — max 99999999 at state level
+- **`Label` on INLINE Map** — warning when `Label` is set on a Map with `Mode: INLINE` (DISTRIBUTED-only field)
+- **`ItemBatcher`, `ItemReader`, `ResultWriter` on INLINE Map** — warning for each DISTRIBUTED-only field used in `Mode: INLINE`
+- **JSONata mode — Fail state path fields** — `ErrorPath` and `CausePath` are JSONPath-only; errors emitted in JSONata mode
+- **JSONata mode — Map path fields** — `MaxConcurrencyPath`, `ToleratedFailureCountPath`, `ToleratedFailurePercentagePath` are JSONPath-only; errors emitted in JSONata mode
+- **`Assign` in JSONPath mode** — `Assign` is a JSONata-only field; warning emitted in JSONPath mode
+- **J-2 recursive** — `Variable` / `Condition` check now traverses `Not`, `And`, and `Or` boolean operators recursively
+- **Timestamp RFC3339 recursive** — `TimestampEquals` and friends validated recursively through `Not`/`And`/`Or` branches
+
+**Infrastructure**
+
+- `onDidChangeConfiguration` handler — setting changes apply immediately: disabling `autoDetect` clears all diagnostics; toggling `lintOnType`/`lintOnSave` re-lints open files at once
+- `@vscode/vsce` added to `devDependencies` (pinned version, no more floating `npx vsce`)
+- CI Node matrix extended to `[18, 20, 22, 24]`
+- CI lint job now includes a `tsc` type-check step
+
+### Changed
+
+- **R-23** severity upgraded from Warning → **Error**: `Mode: INLINE` with `MaxConcurrency > 40` is a hard AWS limit
+- `lintOnType` description updated to mention the 200 ms debounce
+
+### Fixed
+
+- **`toGraphData` dangling edge** — `__START__ → StartAt` edge was created even when `StartAt` was not present in `States`, which could crash Cytoscape; now guarded
+- **`Fail` / `Succeed` not connected to `__END__`** — only states with explicit `End: true` were wired to the End node; `Fail` and `Succeed` are terminal by definition and now always produce a `→ __END__` edge
+- **`__END__` absent when only `Fail` / `Succeed` terminate the machine** — the End node was created only when `some(s => s.End)`; it is now created whenever any state is terminal (`End: true`, `Type: Fail`, or `Type: Succeed`)
+- **`Fail` node label** — `Error` (or `Cause` if `Error` is absent) is now shown as a second line in the node label, giving instant context without navigating to the source
+- **`preview.ts` goto handler** — replaced naive `String.includes()` match (could match `"A:"` inside `"arn:aws:lambda:::fn"`) with the same `^\s+(name|"name")\s*:` regex used by the linter
+- **Webview JSON injection** — `JSON.stringify` does not escape `<`/`>`; added `safeJson` helper that replaces them with `\u003c`/`\u003e` to prevent `</script>` injection from state names
+- **`deactivate()`** — debounce timer is now cleared on extension deactivation (no orphan callback)
+- **Keystroke debounce** — lint and preview update are debounced at 200 ms; `updateSfnContext` (icon visibility) remains immediate
+- **`reachableStates`** — removed a dead loop that pushed Parallel branch state names into the DFS stack; those names never resolved against `def.States` (branch states live in their own scope)
+
+### Tests
+
+- **212 unit tests** (up from 162) — full coverage for all new rules and bug fixes
+
+---
+
 ## [0.1.1] — 2026-04-15
 
 ### Added
