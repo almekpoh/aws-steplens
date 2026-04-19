@@ -11,7 +11,7 @@ examples/**
 # Config / tooling
 .vscode/**
 .vscode-test/**
-.eslintrc.json
+eslint.config.js
 tsconfig.json
 esbuild.js
 
