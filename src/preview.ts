@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
+import * as fs from 'fs';
 import { AslDefinition, AslParser, GraphData, SubGraph } from './aslParser';
 
 export class PreviewPanel {
@@ -47,9 +48,9 @@ export class PreviewPanel {
           );
           if (editor) {
             const lines = this._currentDoc.getText().split('\n');
-            const lineIdx = lines.findIndex(
-              l => l.includes(`${msg.state}:`) || l.includes(`"${msg.state}":`)
-            );
+            const esc = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+            const re = new RegExp(`^\\s+(${esc(msg.state as string)}|"${esc(msg.state as string)}")\\s*:`);
+            const lineIdx = lines.findIndex(l => re.test(l));
             if (lineIdx >= 0) {
               const pos = new vscode.Position(lineIdx, 0);
               editor.revealRange(new vscode.Range(pos, pos), vscode.TextEditorRevealType.InCenter);
@@ -121,7 +122,7 @@ export class PreviewPanel {
       ...subGraphs.map(sg => ({ id: sg.id, label: sg.label, data: sg.data })),
     ];
 
-    // state label → first sub-graph tab id (for click-to-navigate)
+    // state name → first sub-graph tab id (for double-click navigation)
     const nodeToTab: Record<string, string> = {};
     for (const sg of subGraphs) {
       if (!(sg.parentStateName in nodeToTab)) nodeToTab[sg.parentStateName] = sg.id;
@@ -140,370 +141,34 @@ export class PreviewPanel {
       `<div id="pane-${t.id}" class="graph-pane${i === 0 ? ' active' : ''}"><div id="cy-${t.id}" class="cy-container"></div></div>`
     ).join('\n  ');
 
-    const tabsJson      = JSON.stringify(tabs);
-    const nodeToTabJson = JSON.stringify(nodeToTab);
-    const hasSubGraphs  = subGraphs.length > 0;
-
-    return /* html */`<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>StepLens Preview</title>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/cytoscape/3.28.1/cytoscape.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/dagre/0.8.5/dagre.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/cytoscape-dagre@2.5.0/cytoscape-dagre.min.js"></script>
-  <style>
-    * { box-sizing: border-box; margin: 0; padding: 0; }
-    body {
-      background: #141414;
-      font-family: var(--vscode-font-family, 'Segoe UI', sans-serif);
-      display: flex; flex-direction: column; height: 100vh; overflow: hidden;
+    const templatePath = path.join(this._context.extensionPath, 'webview', 'preview.html');
+    let template: string;
+    try {
+      template = fs.readFileSync(templatePath, 'utf8');
+    } catch {
+      vscode.window.showErrorMessage(
+        "StepLens: template de prévisualisation introuvable — réinstallez l'extension."
+      );
+      return this._errorHtml("Erreur interne : template manquant. Réinstallez l'extension.");
     }
 
-    /* ── Tab bar ─────────────────────────────────────────────────────────── */
-    #tab-bar {
-      display: flex; align-items: center; gap: 3px;
-      background: #1c1c1c; border-bottom: 1px solid #2a2a2a;
-      height: 36px; padding: 0 8px; flex-shrink: 0; overflow-x: auto;
-    }
-    .tab-btn {
-      background: none; border: 1px solid transparent; border-radius: 4px;
-      color: #555; cursor: pointer; font-size: 11px; font-family: inherit;
-      padding: 3px 10px; white-space: nowrap; transition: all 0.1s;
-    }
-    .tab-btn.active  { background: #2a2a2a; border-color: #3a3a3a; color: #ddd; }
-    .tab-btn:hover:not(.active) { color: #999; background: #1e1e1e; }
-    .tab-badge {
-      display: inline-block; background: #2a1a3d; color: #a78bfa;
-      border-radius: 3px; font-size: 9px; padding: 1px 4px; margin-left: 4px;
-    }
-    .back-btn {
-      background: #1a1a2e; border: 1px solid #333; border-radius: 4px;
-      color: #7b8cde; cursor: pointer; font-size: 11px; font-family: inherit;
-      padding: 3px 9px; white-space: nowrap; transition: all 0.1s; flex-shrink: 0;
-    }
-    .back-btn:hover { color: #aab4f0; border-color: #555; background: #202038; }
-    .tab-count {
-      display: inline-block; background: #2a2a2a; color: #555;
-      border-radius: 8px; font-size: 9px; padding: 0 4px; margin-left: 3px;
-    }
-    .tab-sep { flex: 1; }
-    .export-btn {
-      background: #1a1a1a; border: 1px solid #333; border-radius: 4px;
-      color: #666; cursor: pointer; font-size: 10px; font-family: inherit;
-      padding: 3px 9px; transition: all 0.1s; white-space: nowrap;
-    }
-    .export-btn:hover { color: #ccc; border-color: #555; background: #222; }
+    const vendorUri = this._panel.webview.asWebviewUri(
+      vscode.Uri.file(path.join(this._context.extensionPath, 'webview', 'vendor.js'))
+    );
 
-    /* ── Graph area ──────────────────────────────────────────────────────── */
-    #graph-area { flex: 1; position: relative; overflow: hidden; }
-    /* visibility:hidden keeps real dimensions (unlike display:none = 0×0),
-       so Cytoscape can measure the container even before the tab is shown. */
-    .graph-pane { position: absolute; top: 0; right: 0; bottom: 0; left: 0; visibility: hidden; pointer-events: none; }
-    .graph-pane.active { visibility: visible; pointer-events: auto; }
-    .cy-container { width: 100%; height: 100%; }
+    // Escape < and > so state names containing </script> cannot break the HTML context
+    const safeJson = (v: unknown) => JSON.stringify(v)
+      .replace(/</g, '\\u003c')
+      .replace(/>/g, '\\u003e');
 
-    /* ── Legend ──────────────────────────────────────────────────────────── */
-    #legend {
-      position: fixed; top: 46px; right: 10px;
-      background: rgba(20,20,20,0.92); border: 1px solid #333; border-radius: 6px;
-      padding: 8px 12px; font-size: 11px; color: #aaa; line-height: 1.9;
-      pointer-events: none; min-width: 145px;
-    }
-    .leg { display: flex; align-items: center; gap: 7px; }
-    .leg-sep { border-top: 1px solid #333; margin: 4px 0; }
-    .dot { width: 10px; height: 10px; border-radius: 2px; flex-shrink: 0; }
-    .line { width: 22px; height: 0; border-bottom: 2px solid; flex-shrink: 0; }
-    .line.dashed { border-bottom-style: dashed; }
-
-    #hint { position: fixed; bottom: 8px; left: 10px; font-size: 10px; color: #3a3a3a; }
-  </style>
-</head>
-<body>
-  <div id="tab-bar">
-    <button id="btn-back" class="back-btn" style="display:none">← Main</button>
-    ${tabButtonsHtml}
-    <div class="tab-sep"></div>
-    <button class="export-btn" id="btn-fit">⊡ Fit</button>
-    <button class="export-btn" id="btn-png">⬇ PNG</button>
-    <button class="export-btn" id="btn-jpg">⬇ JPEG</button>
-  </div>
-
-  <div id="graph-area">
-    ${panesHtml}
-  </div>
-
-  <div id="legend">
-    <div style="font-size:10px;color:#666;margin-bottom:3px;text-transform:uppercase;letter-spacing:.5px">States</div>
-    <div class="leg"><span class="dot" style="background:#1e4080;border:1.5px solid #4a9de8"></span>Task</div>
-    <div class="leg"><span class="dot" style="background:#2e2d00;border:1.5px solid #ffe033;transform:rotate(45deg)"></span>Choice</div>
-    <div class="leg"><span class="dot" style="background:#0d3330;border:1.5px solid #4ec9b0"></span>Wait</div>
-    <div class="leg"><span class="dot" style="background:#2a2a2a;border:1.5px solid #666"></span>Pass</div>
-    <div class="leg"><span class="dot" style="background:#0d3318;border:1.5px solid #4caf50;border-radius:50%"></span>Succeed</div>
-    <div class="leg"><span class="dot" style="background:#3a0d0d;border:1.5px solid #f44336;border-radius:50%"></span>Fail</div>
-    <div class="leg"><span class="dot" style="background:#2a1a3d;border:1.5px solid #a78bfa;border-style:dashed"></span>Parallel / Map</div>
-    <div class="leg"><span class="dot" style="background:#1a3d1a;border:1.5px solid #555;box-shadow:0 0 0 3px rgba(76,175,80,0.12)"></span>↺ avec Retry</div>
-    <div class="leg"><span class="dot" style="background:#2a1a3d;border:1.5px solid #a78bfa;border-style:dashed"></span>‖N branches Parallel</div>
-    <div class="leg"><span class="dot" style="background:#2a1a3d;border:1.5px solid #a78bfa;border-style:dashed"></span>×N concurrence Map (×∞ = illimité)</div>
-    <div class="leg"><span class="dot" style="background:#2a1a3d;border:1.5px solid #a78bfa;border-style:dashed"></span>⊕ Map distribué (DISTRIBUTED)</div>
-    <div class="leg"><span class="dot" style="background:#1e4080;border:1.5px solid #4a9de8"></span>⏸ waitForTaskToken</div>
-    <div class="leg"><span class="dot" style="background:#1e4080;border:1.5px solid #4a9de8"></span>🌐 HTTP Task</div>
-    <div class="leg"><span class="dot" style="background:#2a1800;border:2px solid #f5a623"></span>Current (cursor)</div>
-    <div class="leg-sep"></div>
-    <div style="font-size:10px;color:#666;margin-bottom:3px;text-transform:uppercase;letter-spacing:.5px">Transitions</div>
-    <div class="leg"><span class="line" style="border-color:#555"></span>Next</div>
-    <div class="leg"><span class="line" style="border-color:#a07800"></span>Choice branch</div>
-    <div class="leg"><span class="line dashed" style="border-color:#c0392b"></span>Catch (error)</div>
-  </div>
-
-  <div id="hint">Scroll to zoom · Drag to pan · Click node to jump${hasSubGraphs ? ' · Double-click Parallel/Map to explore sub-graph' : ''}</div>
-
-  <script>
-    const vscode = acquireVsCodeApi();
-    const TABS        = ${tabsJson};
-    const NODE_TO_TAB = ${nodeToTabJson};
-
-    cytoscape.use(cytoscapeDagre);
-
-    // ── Colour palette ────────────────────────────────────────────────────
-    const NS = {
-      Task:     { bg: '#1a3d6e', border: '#4a9de8', shape: 'round-rectangle' },
-      Choice:   { bg: '#2e2d00', border: '#ffe033', shape: 'diamond'         },
-      Wait:     { bg: '#0d2e2b', border: '#4ec9b0', shape: 'round-rectangle' },
-      Pass:     { bg: '#252525', border: '#6b6b6b', shape: 'rectangle'       },
-      Succeed:  { bg: '#0d2e18', border: '#4caf50', shape: 'ellipse'         },
-      Fail:     { bg: '#2e0d0d', border: '#f44336', shape: 'ellipse'         },
-      Parallel: { bg: '#2a1a3d', border: '#a78bfa', shape: 'round-rectangle' },
-      Map:      { bg: '#2a1a3d', border: '#a78bfa', shape: 'round-rectangle' },
-      START:    { bg: '#1a1a3a', border: '#9b59b6', shape: 'ellipse'         },
-      END:      { bg: '#1a1a3a', border: '#9b59b6', shape: 'ellipse'         },
-    };
-
-    const CY_STYLE = [
-      {
-        selector: 'node',
-        style: {
-          'background-color':   'data(bg)',
-          'border-color':       'data(border)',
-          'border-width':       2,
-          'shape':              'data(shape)',
-          'label':              'data(label)',
-          'color':              '#e0e0e0',
-          'font-size':          11,
-          'font-family':        'Consolas, monospace',
-          'text-valign':        'center',
-          'text-halign':        'center',
-          'text-wrap':          'wrap',
-          'text-max-width':     140,
-          'padding':            10,
-          'width':              'label',
-          'height':             32,
-          'min-width':          80,
-          'transition-property':'border-color border-width',
-          'transition-duration':'0.15s',
-        }
-      },
-      {
-        selector: 'node[type="Choice"]',
-        style: { 'height': 48, 'min-width': 100 }
-      },
-      {
-        selector: 'node[type="START"], node[type="END"]',
-        style: { 'font-weight': 'bold', 'width': 60, 'height': 28, 'font-size': 12 }
-      },
-      // Parallel/Map: dashed border to signal clickable expansion
-      {
-        selector: 'node[type="Parallel"], node[type="Map"]',
-        style: { 'border-style': 'dashed', 'border-width': 2.5, 'font-style': 'italic' }
-      },
-      // Retry: subtle green underline glow
-      {
-        selector: 'node[hasRetry="true"]',
-        style: { 'underlay-color': '#4caf50', 'underlay-opacity': 0.08, 'underlay-padding': 3 }
-      },
-      {
-        selector: 'node:active',
-        style: { 'overlay-opacity': 0 }
-      },
-      {
-        selector: 'node.highlighted',
-        style: { 'border-color': '#f5a623', 'border-width': 3.5, 'background-color': '#2a1800' }
-      },
-      {
-        selector: 'edge',
-        style: {
-          'curve-style':           'bezier',
-          'target-arrow-shape':    'triangle',
-          'arrow-scale':           0.9,
-          'line-color':            '#3d3d3d',
-          'target-arrow-color':    '#3d3d3d',
-          'label':                 'data(label)',
-          'font-size':             9,
-          'font-family':           'Consolas, monospace',
-          'color':                 '#858585',
-          'text-background-color': '#141414',
-          'text-background-opacity': 0.85,
-          'text-background-padding': 2,
-          'width':                 1.5,
-          'text-wrap':             'wrap',
-          'text-max-width':        110,
-        }
-      },
-      {
-        selector: 'edge[edgeType="catch"]',
-        style: {
-          'line-color':         '#7a1a1a',
-          'target-arrow-color': '#7a1a1a',
-          'line-style':         'dashed',
-          'line-dash-pattern':  [6, 3],
-          'color':              '#f44336',
-          'width':              1.5,
-        }
-      },
-      {
-        selector: 'edge[edgeType="branch"], edge[edgeType="default"]',
-        style: {
-          'line-color':         '#4a3d00',
-          'target-arrow-color': '#4a3d00',
-          'color':              '#a07800',
-        }
-      },
-    ];
-
-    const LAYOUT = {
-      name:    'dagre',
-      rankDir: 'TB',
-      ranker:  'network-simplex',
-      nodeSep: 60,
-      rankSep: 90,
-      edgeSep: 20,
-      padding: 40,
-      animate: false,
-    };
-
-    function buildElements(graphData) {
-      const nodes = graphData.nodes.map(n => {
-        const s = NS[n.type] || NS.Task;
-        return { data: { id: n.id, label: n.label, type: n.type, bg: s.bg, border: s.border, shape: s.shape, hasRetry: n.hasRetry ? 'true' : 'false' } };
-      });
-      const edges = graphData.edges.map(e => ({
-        data: { id: e.id, source: e.source, target: e.target, label: e.label, edgeType: e.edgeType }
-      }));
-      return [...nodes, ...edges];
-    }
-
-    // ── Initialise ALL Cytoscape instances upfront ────────────────────────
-    // Using visibility:hidden keeps real container dimensions, so every
-    // instance gets correct measurements regardless of which tab is active.
-    const instances = {};
-    let activeTabId = TABS[0]?.id ?? 'main';
-
-    TABS.forEach(tab => {
-      const container = document.getElementById('cy-' + tab.id);
-      if (!container) return;
-
-      const cy = cytoscape({
-        container,
-        elements: buildElements(tab.data),
-        style: CY_STYLE,
-        layout: LAYOUT,
-        wheelSensitivity: 0.3,
-        minZoom: 0.15,
-        maxZoom: 3,
-      });
-
-      // Single click → jump to state in editor (use id = state name)
-      cy.on('tap', 'node', evt => {
-        const id = evt.target.data('id');
-        if (id === '__START__' || id === '__END__') return;
-        vscode.postMessage({ type: 'goto', state: id });
-      });
-
-      // Double-click on Parallel/Map → open sub-graph tab
-      cy.on('dblclick', 'node', evt => {
-        const id   = evt.target.data('id');
-        const type = evt.target.data('type');
-        if ((type === 'Parallel' || type === 'Map') && NODE_TO_TAB[id]) {
-          switchTab(NODE_TO_TAB[id]);
-        }
-      });
-
-      instances[tab.id] = cy;
-    });
-
-    // ── Tab switching ─────────────────────────────────────────────────────
-    function switchTab(id) {
-      document.querySelectorAll('.graph-pane').forEach(p => p.classList.remove('active'));
-      document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
-      document.getElementById('pane-' + id)?.classList.add('active');
-      document.querySelector('.tab-btn[data-id="' + id + '"]')?.classList.add('active');
-      activeTabId = id;
-      document.getElementById('btn-back').style.display = id === 'main' ? 'none' : '';
-      // Trigger a resize so Cytoscape repaints in the now-visible pane
-      instances[id]?.resize();
-      instances[id]?.fit(undefined, 40);
-    }
-
-    document.querySelectorAll('.tab-btn').forEach(btn => {
-      btn.addEventListener('click', () => switchTab(btn.dataset.id));
-    });
-
-    document.getElementById('btn-back').addEventListener('click', () => switchTab('main'));
-    document.getElementById('btn-fit').addEventListener('click', () => {
-      instances[activeTabId]?.fit(undefined, 40);
-    });
-
-    // ── Export ────────────────────────────────────────────────────────────
-    document.getElementById('btn-png').addEventListener('click', () => {
-      const cy = instances[activeTabId];
-      if (!cy) return;
-      vscode.postMessage({
-        type: 'export', format: 'png',
-        data: cy.png({ output: 'base64uri', bg: '#141414', scale: 2 }),
-      });
-    });
-
-    document.getElementById('btn-jpg').addEventListener('click', () => {
-      const cy = instances[activeTabId];
-      if (!cy) return;
-      vscode.postMessage({
-        type: 'export', format: 'jpeg',
-        data: cy.jpg({ output: 'base64uri', bg: '#141414', scale: 2, quality: 0.92 }),
-      });
-    });
-
-    // ── Incoming messages (highlight + live update) ───────────────────────
-    window.addEventListener('message', e => {
-      const msg = e.data;
-
-      if (msg.type === 'highlight') {
-        Object.values(instances).forEach(cy => {
-          cy.nodes().removeClass('highlighted');
-          cy.getElementById(msg.state).addClass('highlighted');
-        });
-
-      } else if (msg.type === 'update') {
-        // Refresh each Cytoscape instance without destroying it.
-        // Save & restore the viewport so zoom/pan are preserved.
-        msg.tabs.forEach(tab => {
-          const cy = instances[tab.id];
-          if (!cy) return;
-          const zoom = cy.zoom();
-          const pan  = cy.pan();
-          cy.elements().remove();
-          cy.add(buildElements(tab.data));
-          cy.layout(LAYOUT).run();
-          cy.viewport({ zoom, pan });
-        });
-        // Sync the navigation map in case a state was renamed
-        Object.keys(NODE_TO_TAB).forEach(k => delete NODE_TO_TAB[k]);
-        Object.assign(NODE_TO_TAB, msg.nodeToTab);
-      }
-    });
-  </script>
-</body>
-</html>`;
+    return template
+      .replace('{{CSP_SOURCE}}', this._panel.webview.cspSource)
+      .replace('{{VENDOR_URI}}', vendorUri.toString())
+      .replace('{{TAB_BUTTONS}}', tabButtonsHtml)
+      .replace('{{PANES}}', panesHtml)
+      .replace('{{TABS_JSON}}', safeJson(tabs))
+      .replace('{{NODE_TO_TAB_JSON}}', safeJson(nodeToTab))
+      .replace('{{HINT_SUBGRAPHS}}', subGraphs.length > 0 ? ' · Double-click Parallel/Map to explore sub-graph' : '');
   }
 
   private _errorHtml(msg: string): string {

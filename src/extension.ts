@@ -1,9 +1,11 @@
 import * as vscode from 'vscode';
-import { AslParser, ParsedSfn } from './aslParser';
-import { AslLinter, findLineForStateName } from './linter';
+import { AslParser } from './aslParser';
+import { AslLinter } from './linter';
 import { PreviewPanel } from './preview';
 
 const SUPPORTED_LANGUAGES = ['yaml', 'json'];
+
+let _debounceTimer: ReturnType<typeof setTimeout> | undefined;
 
 export function activate(context: vscode.ExtensionContext) {
   const diagnostics = vscode.languages.createDiagnosticCollection('steplens');
@@ -62,20 +64,26 @@ export function activate(context: vscode.ExtensionContext) {
     })
   );
 
-  // ── Auto-lint on keystroke ─────────────────────────────────────────────────
+  // ── Auto-lint on keystroke (debounced) ──────────────────────────────────────
   context.subscriptions.push(
     vscode.workspace.onDidChangeTextDocument(e => {
-      const cfg = vscode.workspace.getConfiguration('steplens');
-      if (SUPPORTED_LANGUAGES.includes(e.document.languageId)) {
-        const isActive = vscode.window.activeTextEditor?.document === e.document;
-        if (isActive) updateSfnContext(vscode.window.activeTextEditor);
+      if (!SUPPORTED_LANGUAGES.includes(e.document.languageId)) return;
+
+      const isActive = vscode.window.activeTextEditor?.document === e.document;
+      if (isActive) updateSfnContext(vscode.window.activeTextEditor);
+
+      clearTimeout(_debounceTimer);
+      const doc = e.document;
+      _debounceTimer = setTimeout(() => {
+        const cfg = vscode.workspace.getConfiguration('steplens');
         if (cfg.get('lintOnType')) {
-          runLint(e.document, diagnostics, isActive ? statusBar : undefined);
+          const stillActive = vscode.window.activeTextEditor?.document === doc;
+          runLint(doc, diagnostics, stillActive ? statusBar : undefined);
         }
         if (PreviewPanel.currentPanel) {
-          PreviewPanel.currentPanel.update(e.document);
+          PreviewPanel.currentPanel.update(doc);
         }
-      }
+      }, 200);
     })
   );
 
@@ -93,6 +101,30 @@ export function activate(context: vscode.ExtensionContext) {
   // ── Clear diagnostics on close ─────────────────────────────────────────────
   context.subscriptions.push(
     vscode.workspace.onDidCloseTextDocument(doc => diagnostics.delete(doc.uri))
+  );
+
+  // ── React to settings changes ──────────────────────────────────────────────
+  context.subscriptions.push(
+    vscode.workspace.onDidChangeConfiguration(e => {
+      if (!e.affectsConfiguration('steplens')) return;
+
+      const cfg = vscode.workspace.getConfiguration('steplens');
+
+      if (!cfg.get('autoDetect')) {
+        // autoDetect disabled → wipe all diagnostics immediately
+        diagnostics.clear();
+        statusBar.hide();
+        return;
+      }
+
+      // Any other setting changed (lintOnType, lintOnSave) → re-lint all open
+      // docs so the displayed state is consistent with the new configuration.
+      vscode.workspace.textDocuments.forEach(doc => {
+        if (!SUPPORTED_LANGUAGES.includes(doc.languageId)) return;
+        const isActive = vscode.window.activeTextEditor?.document === doc;
+        runLint(doc, diagnostics, isActive ? statusBar : undefined);
+      });
+    })
   );
 
   // ── Cursor movement → highlight state in graph ────────────────────────────
@@ -140,7 +172,9 @@ function updateSfnContext(editor: vscode.TextEditor | undefined) {
   vscode.commands.executeCommand('setContext', 'steplens.isSfnFile', isSfn);
 }
 
-export function deactivate() {}
+export function deactivate() {
+  clearTimeout(_debounceTimer);
+}
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -152,7 +186,8 @@ function runLint(
   const cfg = vscode.workspace.getConfiguration('steplens');
   if (!cfg.get('autoDetect')) return;
 
-  const parsed = AslParser.parse(doc.getText(), doc.languageId);
+  const text = doc.getText();
+  const parsed = AslParser.parse(text, doc.languageId);
   if (!parsed) {
     col.delete(doc.uri);
     statusBar?.hide();
@@ -160,9 +195,10 @@ function runLint(
   }
 
   const errors = AslLinter.lint(parsed.definition);
+  const lines = text.split('\n');
 
   const diags = errors.map(err => {
-    const line = err.searchKey ? findLineForStateName(doc, err.searchKey) : 0;
+    const line = err.searchKey ? findLineForKey(lines, err.searchKey) : 0;
     const range = new vscode.Range(
       new vscode.Position(line, 0),
       new vscode.Position(line, doc.lineAt(line).text.length)
@@ -192,31 +228,82 @@ function runLint(
   }
 }
 
-/**
- * Walk backwards from lineIdx to find which state block the line belongs to.
- * Matches both YAML (`  StateName:`) and JSON (`  "StateName":`) formats.
- */
-function stateAtLine(
-  doc: vscode.TextDocument,
-  parsed: ParsedSfn,
-  lineIdx: number
-): string | null {
-  const stateNames = AslParser.allStateNames(parsed.definition);
-  const lines = doc.getText().split('\n');
-  for (let i = lineIdx; i >= 0; i--) {
-    const line = lines[i];
-    for (const name of stateNames) {
-      if (new RegExp(`^\\s+(${name}|"${name}")\\s*:`).test(line)) {
-        return name;
-      }
-    }
+// ── Cursor state lookup — cached per (uri, document version) ──────────────────
+// Avoids re-parsing and re-indexing on every cursor movement.
+type CursorCache = {
+  uri: string;
+  version: number;
+  /** line number → state name, only for lines that open a state definition */
+  lineMap: Map<number, string>;
+};
+let _cursorCache: CursorCache | null = null;
+
+function getStateNameAtCursor(editor: vscode.TextEditor): string | null {
+  const doc = editor.document;
+  if (!SUPPORTED_LANGUAGES.includes(doc.languageId)) return null;
+
+  const uri = doc.uri.toString();
+  const version = doc.version;
+
+  // Rebuild index only when the document actually changed
+  if (!_cursorCache || _cursorCache.uri !== uri || _cursorCache.version !== version) {
+    const parsed = AslParser.parse(doc.getText(), doc.languageId);
+    if (!parsed) { _cursorCache = null; return null; }
+
+    const stateNames = AslParser.allStateNames(parsed.definition);
+    _cursorCache = { uri, version, lineMap: buildStateLineIndex(doc, stateNames) };
+  }
+
+  // O(k) walk backwards where k = distance to nearest state header above cursor
+  const { lineMap } = _cursorCache;
+  for (let i = editor.selection.active.line; i >= 0; i--) {
+    const name = lineMap.get(i);
+    if (name !== undefined) return name;
   }
   return null;
 }
 
-function getStateNameAtCursor(editor: vscode.TextEditor): string | null {
-  const doc = editor.document;
-  const parsed = AslParser.parse(doc.getText(), doc.languageId);
-  if (!parsed) return null;
-  return stateAtLine(doc, parsed, editor.selection.active.line);
+/**
+ * Scan the document once and record which line each state definition starts on.
+ * RegExps are compiled once per state name, not once per (line × state name).
+ */
+function buildStateLineIndex(
+  doc: vscode.TextDocument,
+  stateNames: string[]
+): Map<number, string> {
+  const lineMap = new Map<number, string>();
+  if (stateNames.length === 0) return lineMap;
+
+  const patterns = stateNames.map(name => ({
+    name,
+    re: new RegExp(`^\\s+(${escRe(name)}|"${escRe(name)}")\\s*:`),
+  }));
+
+  for (let i = 0; i < doc.lineCount; i++) {
+    const text = doc.lineAt(i).text;
+    for (const { name, re } of patterns) {
+      if (re.test(text)) {
+        lineMap.set(i, name);
+        break;
+      }
+    }
+  }
+  return lineMap;
+}
+
+/**
+ * Find the 0-based line number of a state name in pre-split lines.
+ * Avoids re-splitting the document text for every error.
+ */
+function findLineForKey(lines: string[], stateName: string): number {
+  const esc = escRe(stateName);
+  const pattern = new RegExp(`^\\s+(${esc}|"${esc}")\\s*:`);
+  for (let i = 0; i < lines.length; i++) {
+    if (pattern.test(lines[i])) return i;
+  }
+  return 0;
+}
+
+function escRe(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }

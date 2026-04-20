@@ -1,15 +1,16 @@
 name: CI
 
 on:
-  push:
-    branches: [main, master]
   pull_request:
     branches: [main, master]
 
 jobs:
   test:
-    name: Unit tests
+    name: Unit tests (Node ${{ matrix.node-version }})
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        node-version: [18, 20, 22, 24]
 
     steps:
       - uses: actions/checkout@v4
@@ -17,7 +18,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '24'
+          node-version: ${{ matrix.node-version }}
           cache: 'npm'
 
       - name: Install dependencies
@@ -36,7 +37,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '24'
+          node-version: '22'
           cache: 'npm'
 
       - name: Install dependencies
@@ -44,6 +45,9 @@ jobs:
 
       - name: Lint
         run: npm run lint
+
+      - name: Type-check
+        run: npm run compile
 
   build:
     name: Bundle
@@ -56,7 +60,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '24'
+          node-version: '22'
           cache: 'npm'
 
       - name: Install dependencies
@@ -64,6 +68,9 @@ jobs:
 
       - name: Bundle extension
         run: npm run bundle
+
+      - name: Bundle webview vendor
+        run: npm run bundle:webview
 
       - name: Package VSIX
         run: npx vsce package --no-dependencies

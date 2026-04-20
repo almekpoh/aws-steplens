@@ -32,12 +32,13 @@ Open a live graph of your state machine with a single click on the ⊤ toolbar i
 | `⊕` in label | Distributed Map (`ItemProcessor.ProcessorConfig.Mode: DISTRIBUTED`) |
 | `⏸` in label | Task using `.waitForTaskToken` (waits for external callback) |
 | `🌐` in label | HTTP Task (`states:::http:invoke`) |
+| second line in Fail label | `Error` value (or `Cause` if `Error` is absent) — shown directly on the node |
 | Purple dashed border | Parallel / Map — double-click to explore the sub-graph |
 | Orange highlight | State at cursor position |
 
 ### Real-time Linter
 
-**30+ rules** covering structural validity, JSONata/JSONPath field usage, distributed Map configuration, and state name constraints. Errors and warnings appear inline as you type, with hover tooltips explaining each issue.
+**50+ rules** covering structural validity, JSONata/JSONPath field usage, distributed Map configuration, and state name constraints. Errors and warnings appear inline as you type, with hover tooltips explaining each issue.
 
 #### Structural rules
 
@@ -65,15 +66,24 @@ Open a live graph of your state machine with a single click on the ⊤ toolbar i
 | R-20 | Error | `MaxConcurrency`/`MaxConcurrencyPath` mutually exclusive (and `ToleratedFailureCount*`, `ToleratedFailurePercentage*`) |
 | R-21 | Error | `ProcessorConfig.ExecutionType` required when `Mode: DISTRIBUTED` |
 | R-22 | Warning | `ProcessorConfig.ExecutionType` ignored in `Mode: INLINE` (only applies to DISTRIBUTED) |
-| R-23 | Warning | `Mode: INLINE` with `MaxConcurrency > 40` — switch to `DISTRIBUTED` to exceed this limit |
+| R-23 | Error | `Mode: INLINE` with `MaxConcurrency > 40` — switch to `DISTRIBUTED` to exceed this limit |
 | R-24 | Error | State name exceeds 80 characters |
 | R-25 | Error | State name contains forbidden characters |
 | W-1 | Warning | State is unreachable from `StartAt` |
 | W-2 | Warning | Choice state has no `Default` — risk of `States.NoChoiceMatched` at runtime |
 | W-3 | Error | `$states.errorOutput` used outside a `Catch` block (JSONata) |
 | W-4 | Warning | `$states.context.Task.Token` used in a state that is not `.waitForTaskToken` |
+| — | Error | Task state is missing the required `Resource` field |
+| — | Error | Choice state has a top-level `End` or `Next` (forbidden — use `Choices[].Next` / `Default`) |
+| — | Error | `Version` present but not `"1.0"` |
+| — | Error | `QueryLanguage` is not `"JSONata"` or `"JSONPath"` (definition or state level) |
+| — | Error | Global `TimeoutSeconds` outside the valid range 1–99999999 |
+| — | Error | `Retry.IntervalSeconds` outside 1–99999999; `MaxDelaySeconds` outside 1–31622400 |
+| — | Error | `Retry.MaxAttempts` is negative; `BackoffRate` is less than 1.0 |
+| — | Error | `Retry.JitterStrategy` is not `"FULL"` or `"NONE"` |
+| — | Error | `TimeoutSeconds` or `HeartbeatSeconds` exceeds 99999999 |
+| — | Warning | `Label`, `ItemBatcher`, `ItemReader`, or `ResultWriter` used on a Map in `INLINE` mode (DISTRIBUTED-only fields) |
 | — | Warning | Deprecated `Iterator` field — migrate to `ItemProcessor` |
-| — | Error | `BackoffRate` in Retry must be ≥ 1.0 |
 | — | Error | Distributed Map `Label` exceeds 40 characters or contains forbidden characters |
 | — | Error | `.waitForTaskToken` used inside a Distributed Map with `ExecutionType: EXPRESS` |
 
@@ -81,8 +91,8 @@ Open a live graph of your state machine with a single click on the ⊤ toolbar i
 
 | Rule | Severity | Description |
 |------|----------|-------------|
-| J-1 | Error/Warn | Wrong fields for the active query language (`Parameters`↔`Arguments`, `OutputPath`↔`Output`, etc.) |
-| J-2 | Error | Choice branch uses `Variable` in JSONata mode (use `Condition`) or vice-versa; `Condition` must be wrapped in `{%…%}` |
+| J-1 | Error/Warn | Wrong fields for the active query language (`Parameters`↔`Arguments`, `OutputPath`↔`Output`, `Assign`, etc.) |
+| J-2 | Error | Choice branch uses `Variable` in JSONata mode (use `Condition`) or vice-versa; validated recursively through `Not`/`And`/`Or`; `Condition` must be wrapped in `{%…%}` |
 | J-3 | Error | Invalid `{%…%}` expression: empty, unclosed brace/bracket/paren/string, `$eval()`, trailing operator, JSONPath `$.` syntax inside JSONata |
 | J-4 | Error | `$states.result` used in a state that has no result (only available in Task, Parallel, Map) |
 | J-5 | Error | `ResultSelector` is JSONPath-only — not available in JSONata mode |
@@ -90,6 +100,8 @@ Open a live graph of your state machine with a single click on the ⊤ toolbar i
 | J-7 | Error | `SecondsPath` / `TimestampPath` in Wait state are JSONPath-only |
 | J-8 | Error | `States.*` intrinsic functions (e.g. `States.Format`) used inside a `{%…%}` JSONata expression — these only work in JSONPath mode |
 | J-9 | Error | `$$.` (Context Object JSONPath syntax) used in JSONata mode — use `$states.context` instead |
+| — | Error | `ErrorPath` / `CausePath` in a Fail state are JSONPath-only |
+| — | Error | `MaxConcurrencyPath`, `ToleratedFailureCountPath`, `ToleratedFailurePercentagePath` are JSONPath-only |
 
 ---
 
@@ -116,8 +128,10 @@ You can also run StepLens commands from the **Command Palette** (`⇧⌘P` on ma
 | Setting | Default | Description |
 |---------|---------|-------------|
 | `steplens.autoDetect` | `true` | Auto-detect Step Functions files by looking for a `States` key |
-| `steplens.lintOnType` | `true` | Run linter on every keystroke |
+| `steplens.lintOnType` | `true` | Run linter on every keystroke (200 ms debounce) |
 | `steplens.lintOnSave` | `true` | Run linter on file save |
+
+> Setting changes apply immediately — disabling `autoDetect` clears all diagnostics at once; toggling `lintOnType` or `lintOnSave` re-lints all open files right away.
 
 ---
 
