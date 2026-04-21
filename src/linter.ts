@@ -152,14 +152,6 @@ export class AslLinter {
           searchKey: name,
         });
       }
-      if (isTerminal && state.End) {
-        errors.push({
-          message: `"${name}" (${state.Type}): "End" is implicit and redundant on a terminal state`,
-          severity: vscode.DiagnosticSeverity.Warning,
-          searchKey: name,
-        });
-      }
-
       // ── Choice must not have Retry, Catch, Next, or End ─────────────────────
       if (isChoice) {
         if ((state.Retry?.length ?? 0) > 0) {
@@ -307,7 +299,7 @@ export class AslLinter {
           });
         }
         // JitterStrategy must be FULL or NONE
-        if (r.JitterStrategy !== undefined && r.JitterStrategy !== 'FULL' && r.JitterStrategy !== 'NONE') {
+        if (r.JitterStrategy !== undefined && !r.JitterStrategy.includes('{%') && !r.JitterStrategy.startsWith('$') && r.JitterStrategy !== 'FULL' && r.JitterStrategy !== 'NONE') {
           errors.push({
             message: `"${name}": Retry[${i}].JitterStrategy "${r.JitterStrategy}" is not valid — accepted values: FULL, NONE`,
             severity: vscode.DiagnosticSeverity.Error,
@@ -408,8 +400,11 @@ export class AslLinter {
       }
 
       // ── Resource ARN + integration pattern validation (Task states only) ───
-      const resource = state.Resource ?? '';
-      if (state.Type === 'Task' && resource) {
+      // If Resource is a CF intrinsic object (Fn::GetAtt, Fn::Sub…) treat as empty — no string ops possible.
+      // If Resource is a string without ":" it is a CF tag result (!GetAtt, !Ref) — cannot be validated as ARN.
+      const resource = typeof state.Resource === 'string' ? state.Resource : '';
+      const isResolvableResource = resource.includes(':'); // real ARNs always contain ":"
+      if (state.Type === 'Task' && isResolvableResource) {
 
         // ── ARN-1: Resource must start with arn: ────────────────────────────
         if (!resource.startsWith('arn:')) {
@@ -445,28 +440,10 @@ export class AslLinter {
             });
           }
 
-          // .sync requires Standard workflow (only when the service supports it)
-          if (!isAwsSdk && (pattern === 'sync' || pattern === 'sync:2') && !NO_SYNC_SERVICES.has(service)) {
-            errors.push({
-              message: `"${name}": ".${pattern}" requires a Standard workflow — not compatible with Express workflows`,
-              severity: vscode.DiagnosticSeverity.Warning,
-              searchKey: name,
-            });
-          }
-
           if (pattern === 'waitForTaskToken' && NO_WAIT_FOR_TOKEN_SERVICES.has(service)) {
             errors.push({
               message: `"${name}": service "${service}" does not support ".waitForTaskToken"`,
               severity: vscode.DiagnosticSeverity.Error,
-              searchKey: name,
-            });
-          }
-
-          // .waitForTaskToken requires Standard workflow (Express only supports request-response)
-          if (!isAwsSdk && pattern === 'waitForTaskToken' && !NO_WAIT_FOR_TOKEN_SERVICES.has(service)) {
-            errors.push({
-              message: `"${name}": ".waitForTaskToken" requires a Standard workflow — not compatible with Express workflows`,
-              severity: vscode.DiagnosticSeverity.Warning,
               searchKey: name,
             });
           }
@@ -488,7 +465,7 @@ export class AslLinter {
                 severity: vscode.DiagnosticSeverity.Error,
                 searchKey: name,
               });
-            } else if (typeof method === 'string') {
+            } else if (typeof method === 'string' && !method.includes('{%') && !method.startsWith('$')) {
               const VALID_METHODS = new Set(['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS', 'HEAD']);
               if (!VALID_METHODS.has(method.toUpperCase())) {
                 errors.push({
@@ -497,15 +474,6 @@ export class AslLinter {
                   searchKey: name,
                 });
               }
-            }
-            const auth = params['Authentication'] as Record<string, unknown> | undefined;
-            const invocCfg = params['InvocationConfig'] as Record<string, unknown> | undefined;
-            if (!auth?.['ConnectionArn'] && !invocCfg?.['ConnectionArn']) {
-              errors.push({
-                message: `"${name}" (HTTP Task): "Authentication.ConnectionArn" or "InvocationConfig.ConnectionArn" recommended for secure HTTP calls`,
-                severity: vscode.DiagnosticSeverity.Warning,
-                searchKey: name,
-              });
             }
           }
         }
@@ -526,9 +494,9 @@ export class AslLinter {
           });
         }
 
-        if (!state.HeartbeatSeconds && !state.HeartbeatSecondsPath) {
+        if (!state.HeartbeatSeconds && !state.HeartbeatSecondsPath && !state.TimeoutSeconds && !state.TimeoutSecondsPath) {
           errors.push({
-            message: `"${name}": waitForTaskToken without HeartbeatSeconds — execution may block indefinitely`,
+            message: `"${name}": waitForTaskToken without HeartbeatSeconds or TimeoutSeconds — execution may block indefinitely`,
             severity: vscode.DiagnosticSeverity.Warning,
             searchKey: name,
           });
@@ -556,14 +524,6 @@ export class AslLinter {
         }
       }
 
-      // ── R-10: MaxConcurrency: 0 on Map = unlimited (warning) ─────────────
-      if (state.Type === 'Map' && state.MaxConcurrency === 0) {
-        errors.push({
-          message: `"${name}": MaxConcurrency: 0 means unlimited concurrency — verify this is intentional`,
-          severity: vscode.DiagnosticSeverity.Warning,
-          searchKey: name,
-        });
-      }
 
       // ── R-11: TimeoutSeconds / TimeoutSecondsPath mutual exclusion ────────
       if (state.TimeoutSeconds !== undefined && state.TimeoutSecondsPath !== undefined) {
@@ -612,7 +572,8 @@ export class AslLinter {
           searchKey: name,
         });
       }
-      if (state.HeartbeatSeconds !== undefined && state.TimeoutSeconds !== undefined) {
+      if (state.HeartbeatSeconds !== undefined && state.TimeoutSeconds !== undefined &&
+          typeof state.HeartbeatSeconds === 'number' && typeof state.TimeoutSeconds === 'number') {
         if (state.HeartbeatSeconds >= state.TimeoutSeconds) {
           errors.push({
             message: `"${name}": HeartbeatSeconds (${state.HeartbeatSeconds}) must be less than TimeoutSeconds (${state.TimeoutSeconds})`,
@@ -666,7 +627,8 @@ export class AslLinter {
           });
         }
         // Timestamp must be RFC 3339 with uppercase T and uppercase Z
-        if (typeof state.Timestamp === 'string' && !RFC3339_RE.test(state.Timestamp)) {
+        // Skip dynamic values: JSONata expressions ({%...%}) and JSONPath references ($./ $$.)
+        if (typeof state.Timestamp === 'string' && !state.Timestamp.includes('{%') && !state.Timestamp.startsWith('$') && !RFC3339_RE.test(state.Timestamp)) {
           errors.push({
             message: `"${name}" (Wait): Timestamp "${state.Timestamp}" is not valid — RFC3339 format required with uppercase T and Z (e.g. "2024-01-15T12:00:00Z")`,
             severity: vscode.DiagnosticSeverity.Error,
@@ -709,48 +671,11 @@ export class AslLinter {
         });
       }
 
-      // ── Deprecated Iterator warning ───────────────────────────────────────
-      if (state.Type === 'Map' && state.Iterator && !state.ItemProcessor) {
-        errors.push({
-          message: `"${name}": "Iterator" is deprecated — migrate to "ItemProcessor"`,
-          severity: vscode.DiagnosticSeverity.Warning,
-          searchKey: name,
-        });
-      }
-
-      // ── Deprecated Parameters in Map (use ItemSelector) ──────────────────
-      if (state.Type === 'Map' && state.Parameters !== undefined && state.ItemSelector === undefined) {
-        errors.push({
-          message: `"${name}": "Parameters" is deprecated in Map — migrate to "ItemSelector"`,
-          severity: vscode.DiagnosticSeverity.Warning,
-          searchKey: name,
-        });
-      }
-
-      // ── Activity ARN not supported in Express Workflows ───────────────────
-      if (state.Type === 'Task' && /^arn:[^:]*:states:[^:]*:[^:]*:activity:/.test(resource)) {
-        errors.push({
-          message: `"${name}": Activities are not supported in Express workflows (Standard only)`,
-          severity: vscode.DiagnosticSeverity.Warning,
-          searchKey: name,
-        });
-      }
-
-
       // ── ProcessorConfig validation ────────────────────────────────────────
       if (state.Type === 'Map' && state.ItemProcessor) {
         const pc = (state.ItemProcessor as { ProcessorConfig?: { Mode?: string; ExecutionType?: string } }).ProcessorConfig;
         const mode = pc?.Mode ?? 'INLINE';
         const execType = pc?.ExecutionType;
-
-        // DISTRIBUTED mode: Standard workflow only
-        if (mode === 'DISTRIBUTED') {
-          errors.push({
-            message: `"${name}": DISTRIBUTED mode requires a Standard workflow — not supported in Express workflows`,
-            severity: vscode.DiagnosticSeverity.Warning,
-            searchKey: name,
-          });
-        }
 
         // ExecutionType required when DISTRIBUTED
         if (mode === 'DISTRIBUTED' && !execType) {
@@ -782,7 +707,7 @@ export class AslLinter {
         // waitForTaskToken not supported in EXPRESS children
         if (mode === 'DISTRIBUTED' && execType === 'EXPRESS') {
           const hasWaitForToken = Object.values(state.ItemProcessor?.States ?? {})
-            .some(s => (s.Resource ?? '').includes('waitForTaskToken'));
+            .some(s => typeof s.Resource === 'string' && s.Resource.includes('waitForTaskToken'));
           if (hasWaitForToken) {
             errors.push({
               message: `"${name}": EXPRESS child executions do not support .waitForTaskToken (request-response only)`,
@@ -939,7 +864,7 @@ export class AslLinter {
             for (const leaf of collectChoiceLeaves(c as Record<string, unknown>)) {
               for (const key of TIMESTAMP_LITERAL_KEYS) {
                 const val = leaf[key];
-                if (typeof val === 'string' && !RFC3339_RE.test(val)) {
+                if (typeof val === 'string' && !val.includes('{%') && !val.startsWith('$') && !RFC3339_RE.test(val)) {
                   errors.push({
                     message: `"${name}": Choices[${i}].${key} "${val}" is not valid — RFC3339 format required with uppercase T and Z (e.g. "2024-01-15T12:00:00Z")`,
                     severity: vscode.DiagnosticSeverity.Error,

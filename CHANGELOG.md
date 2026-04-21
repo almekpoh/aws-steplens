@@ -2,6 +2,54 @@
 
 ---
 
+## [0.2.1] — 2026-04-21
+
+### Fixed
+
+**Linter & Parser — CloudFormation intrinsic Resource references**
+
+Task states using CloudFormation intrinsic functions for their `Resource` field (e.g. `Fn::GetAtt: [MyLambda, Arn]` or `!GetAtt MyLambda.Arn`) no longer crash the linter or parser:
+
+- **`Fn::GetAtt` / `Fn::Sub` (map form)** — parsed as an object by the YAML library; `??` did not fall back to `""`, causing `.includes()` and `.startsWith()` calls to throw at runtime
+- **`!GetAtt` / `!Ref` (tag form)** — parsed as a plain string without colons (e.g. `"MyLambda.Arn"`); now correctly identified as an unresolvable CF reference and excluded from ARN validation
+- All ARN-based checks (format, SDK pattern compatibility, HTTP Task field requirements) are skipped for these references — they are only applicable to literal ARN strings and have no false-positive risk here
+
+**Linter — dynamic value false positives removed**
+
+Fields that accept dynamic values (JSONata expressions `{%…%}` or JSONPath references `$.` / `$$.`) no longer trigger static-format validators:
+
+- **`Timestamp` in Wait state** — RFC3339 validation skipped when value is a JSONata expression or JSONPath reference
+- **`TimestampEquals` / `TimestampGreaterThan` / … in Choice branches** — same
+- **HTTP Task `Method`** — accepted method validation skipped for dynamic values
+- **`Retry.JitterStrategy`** — `FULL`/`NONE` enum check skipped for dynamic values
+- **R-12 (`HeartbeatSeconds < TimeoutSeconds`)** — comparison skipped when either field is not a plain number, preventing a lexicographic false positive when both are dynamic expressions
+
+**Linter — false positive warnings removed**
+
+All checks that assumed a specific workflow type (Standard vs Express) have been removed. The linter cannot determine the workflow type from the ASL definition alone, so these rules generated spurious warnings on every valid Standard workflow.
+
+- **DISTRIBUTED Map** — warning "requires a Standard workflow" removed; DISTRIBUTED mode is valid in both Standard and Express parent workflows
+- **Activity ARN** — warning "not supported in Express workflows" removed; Activities are valid in Standard workflows
+- **`.sync` / `.sync:2` integration pattern** — warning "requires a Standard workflow" removed; these patterns are documented constraints, not detectable errors without knowing the parent type
+- **`.waitForTaskToken` integration pattern** — same removal rationale
+- **`End: true` on Succeed/Fail** — warning "implicit and redundant" removed; AWS silently ignores the field and many users write it explicitly for clarity
+- **HTTP Task without `ConnectionArn`** — recommendation warning removed; public APIs do not require authentication
+- **`MaxConcurrency: 0`** — warning "unlimited concurrency" removed; 0 is the documented and intentional way to express unlimited concurrency
+- **`Iterator` deprecated** — migration warning removed; `Iterator` still works and the warning generated permanent noise on legacy codebases
+- **`Parameters` deprecated in Map** — same removal rationale
+
+**Linter — precision fix**
+
+- **`waitForTaskToken` without `HeartbeatSeconds`** — now only warns when neither `HeartbeatSeconds` nor `TimeoutSeconds` (nor their `*Path` variants) is set; a state-level `TimeoutSeconds` prevents indefinite blocking and was previously ignored by this check
+
+**Graph preview — black screen (additional fixes)**
+
+- **Initial fit** — all Cytoscape instances now call `resize()` + `fit()` inside a `requestAnimationFrame` after init, guaranteeing the browser has completed its flex layout before Cytoscape measures container dimensions
+- **`update` viewport** — the `update` message handler no longer restores the previous zoom/pan after a layout rerun; it now calls `fit()` on the active tab, preventing the view from landing on an empty area when node positions shift
+- **`resize` handler scope** — the `resize` message now iterates all instances (not only the active tab), ensuring hidden sub-graph tabs are also corrected when the panel becomes visible
+
+---
+
 ## [0.2.0] — 2026-04-20
 
 ### Fixed

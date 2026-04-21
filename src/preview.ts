@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs';
+import * as crypto from 'crypto';
 import { AslDefinition, AslParser, GraphData, SubGraph } from './aslParser';
 
 export class PreviewPanel {
@@ -163,13 +164,16 @@ export class PreviewPanel {
       vscode.Uri.file(path.join(this._context.extensionPath, 'webview', 'vendor.js'))
     );
 
+    const nonce = crypto.randomBytes(16).toString('base64');
+
     // Escape < and > so state names containing </script> cannot break the HTML context
     const safeJson = (v: unknown) => JSON.stringify(v)
       .replace(/</g, '\\u003c')
       .replace(/>/g, '\\u003e');
 
     return template
-      .replace('{{CSP_SOURCE}}', this._panel.webview.cspSource)
+      .replace('{{CSP_SOURCE}}', `${this._panel.webview.cspSource} 'nonce-${nonce}'`)
+      .replace('{{NONCE}}', nonce)
       .replace('{{VENDOR_URI}}', vendorUri.toString())
       .replace('{{TAB_BUTTONS}}', tabButtonsHtml)
       .replace('{{PANES}}', panesHtml)

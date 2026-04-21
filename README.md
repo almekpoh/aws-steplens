@@ -39,7 +39,7 @@ Open a live graph of your state machine with a single click on the ⊤ toolbar i
 
 ### Real-time Linter
 
-**50+ rules** covering structural validity, JSONata/JSONPath field usage, distributed Map configuration, and state name constraints. Errors and warnings appear inline as you type, with hover tooltips explaining each issue.
+**50+ rules** covering structural validity, JSONata/JSONPath field usage, distributed Map configuration, and state name constraints. Errors and warnings appear inline as you type, with hover tooltips explaining each issue. Every rule fires only on what can be determined from the ASL definition itself — no false positives from workflow-type assumptions.
 
 #### Structural rules
 
@@ -52,9 +52,8 @@ Open a live graph of your state machine with a single click on the ⊤ toolbar i
 | R-5 | Error | Choice state: no branches, a branch has no `Next`, or `Choices[i].Next` not found |
 | R-6 | Error | Parallel / Map state has neither `Next` nor `End` |
 | R-7 | Error | Parallel branch is not a valid sub-state-machine (recursive validation) |
-| R-8 | Warning | `waitForTaskToken` without `HeartbeatSeconds` or missing `Catch: HeartbeatTimeout` |
+| R-8 | Warning | `waitForTaskToken` with no `Catch` for `States.HeartbeatTimeout` (deadlock risk); also warns when neither `HeartbeatSeconds`/`HeartbeatSecondsPath` nor `TimeoutSeconds`/`TimeoutSecondsPath` is set (may block indefinitely) |
 | R-9 | Error | Map `Iterator` / `ItemProcessor` is missing or not a valid sub-state-machine |
-| R-10 | Warning | `MaxConcurrency: 0` on Map state — unlimited concurrency, verify it's intentional |
 | R-11 | Error | `TimeoutSeconds` and `TimeoutSecondsPath` are mutually exclusive (same for `HeartbeatSeconds`/`HeartbeatSecondsPath`) |
 | R-12 | Error | `HeartbeatSeconds` must be less than `TimeoutSeconds` when both are defined |
 | R-13 | Error | Fail state: `Error`/`ErrorPath` mutually exclusive; `Cause`/`CausePath` mutually exclusive |
@@ -84,7 +83,6 @@ Open a live graph of your state machine with a single click on the ⊤ toolbar i
 | — | Error | `Retry.JitterStrategy` is not `"FULL"` or `"NONE"` |
 | — | Error | `TimeoutSeconds` or `HeartbeatSeconds` exceeds 99999999 |
 | — | Warning | `Label`, `ItemBatcher`, `ItemReader`, or `ResultWriter` used on a Map in `INLINE` mode (DISTRIBUTED-only fields) |
-| — | Warning | Deprecated `Iterator` field — migrate to `ItemProcessor` |
 | — | Error | Distributed Map `Label` exceeds 40 characters or contains forbidden characters |
 | — | Error | `.waitForTaskToken` used inside a Distributed Map with `ExecutionType: EXPRESS` |
 

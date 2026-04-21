@@ -231,8 +231,9 @@ export class AslParser {
 
     for (const [name, state] of Object.entries(def.States)) {
       let label = name;
-      const isWaitForToken = (state.Resource ?? '').includes('waitForTaskToken');
-      const isHttpTask = (state.Resource ?? '').includes('states:::http:invoke');
+      const resourceStr = typeof state.Resource === 'string' ? state.Resource : '';
+      const isWaitForToken = resourceStr.includes('waitForTaskToken');
+      const isHttpTask = resourceStr.includes('states:::http:invoke');
       const isDistributedMap = state.Type === 'Map' &&
         (state.ItemProcessor as AslItemProcessor | undefined)?.ProcessorConfig?.Mode === 'DISTRIBUTED';
 

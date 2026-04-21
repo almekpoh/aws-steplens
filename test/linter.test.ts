@@ -153,25 +153,6 @@ States:
   });
 });
 
-// ── R-10: MaxConcurrency: 0 ───────────────────────────────────────────────────
-
-describe('R-10: MaxConcurrency 0 warning', () => {
-  it('warns when MaxConcurrency is 0', () => {
-    const errs = lint(`
-StartAt: M
-States:
-  M:
-    Type: Map
-    MaxConcurrency: 0
-    ItemProcessor:
-      StartAt: C
-      States:
-        C: { Type: Task, Resource: arn, End: true }
-    End: true
-`);
-    assert.ok(hasError(errs, 'unlimited'));
-  });
-});
 
 // ── R-11: Timeout mutual exclusion ───────────────────────────────────────────
 
@@ -599,24 +580,6 @@ States:
   });
 });
 
-// ── Deprecated Iterator ───────────────────────────────────────────────────────
-
-describe('Deprecated Iterator warning', () => {
-  it('warns when Iterator used instead of ItemProcessor', () => {
-    const errs = lint(`
-StartAt: M
-States:
-  M:
-    Type: Map
-    Iterator:
-      StartAt: C
-      States:
-        C: { Type: Task, Resource: arn, End: true }
-    End: true
-`);
-    assert.ok(hasError(errs, '"Iterator" is deprecated'));
-  });
-});
 
 // ── R-6: Parallel/Map must have Next or End ──────────────────────────────────
 
@@ -1258,30 +1221,6 @@ States:
     assert.ok(hasError(errs, 'service "http" does not support ".sync"'));
   });
 
-  it('warns that .sync requires Standard workflow', () => {
-    const errs = lint(`
-StartAt: A
-States:
-  A:
-    Type: Task
-    Resource: arn:aws:states:::ecs:runTask.sync
-    End: true
-`);
-    assert.ok(hasError(errs, 'requires a Standard workflow'));
-  });
-
-  it('warns that .sync:2 requires Standard workflow', () => {
-    const errs = lint(`
-StartAt: A
-States:
-  A:
-    Type: Task
-    Resource: arn:aws:states:::ecs:runTask.sync:2
-    End: true
-`);
-    assert.ok(hasError(errs, 'requires a Standard workflow'));
-  });
-
   it('does not warn for fire-and-forget Lambda integration', () => {
     const errs = lint(`
 StartAt: A
@@ -1292,7 +1231,6 @@ States:
     End: true
 `);
     assert.ok(!hasError(errs, 'does not support'));
-    assert.ok(!hasError(errs, 'requires a Standard workflow'));
   });
 });
 
@@ -1321,7 +1259,7 @@ States:
     assert.ok(hasError(errs, 'service "athena" does not support ".waitForTaskToken"'));
   });
 
-  it('passes .waitForTaskToken on Lambda (warns Standard workflow)', () => {
+  it('passes .waitForTaskToken on Lambda', () => {
     const errs = lint(`
 StartAt: A
 States:
@@ -1331,10 +1269,9 @@ States:
     End: true
 `);
     assert.ok(!hasError(errs, 'does not support ".waitForTaskToken"'));
-    assert.ok(hasError(errs, 'requires a Standard workflow'));
   });
 
-  it('passes .waitForTaskToken on SQS (warns Standard workflow)', () => {
+  it('passes .waitForTaskToken on SQS', () => {
     const errs = lint(`
 StartAt: A
 States:
@@ -1344,10 +1281,9 @@ States:
     End: true
 `);
     assert.ok(!hasError(errs, 'does not support ".waitForTaskToken"'));
-    assert.ok(hasError(errs, 'requires a Standard workflow'));
   });
 
-  it('passes .waitForTaskToken on SNS (warns Standard workflow)', () => {
+  it('passes .waitForTaskToken on SNS', () => {
     const errs = lint(`
 StartAt: A
 States:
@@ -1357,10 +1293,9 @@ States:
     End: true
 `);
     assert.ok(!hasError(errs, 'does not support ".waitForTaskToken"'));
-    assert.ok(hasError(errs, 'requires a Standard workflow'));
   });
 
-  it('passes .waitForTaskToken on EventBridge (warns Standard workflow)', () => {
+  it('passes .waitForTaskToken on EventBridge', () => {
     const errs = lint(`
 StartAt: A
 States:
@@ -1370,7 +1305,6 @@ States:
     End: true
 `);
     assert.ok(!hasError(errs, 'does not support ".waitForTaskToken"'));
-    assert.ok(hasError(errs, 'requires a Standard workflow'));
   });
 });
 
@@ -1417,17 +1351,6 @@ States:
     assert.ok(hasError(errs, 'service "apigateway" does not support ".sync"'));
   });
 
-  it('does NOT warn Standard workflow for lambda .sync (already an error)', () => {
-    const errs = lint(`
-StartAt: A
-States:
-  A:
-    Type: Task
-    Resource: arn:aws:states:::lambda:invoke.sync
-    End: true
-`);
-    assert.ok(!hasError(errs, 'requires a Standard workflow'));
-  });
 });
 
 // ── ARN-2: EventBridge supports .waitForTaskToken ────────────────────────────
@@ -1449,8 +1372,6 @@ States:
 `);
     assert.ok(!hasError(errs, '"events" does not support ".waitForTaskToken"'));
     assert.ok(!hasError(errs, '"eventbridge" does not support ".waitForTaskToken"'));
-    // Does warn about Standard workflow requirement
-    assert.ok(hasError(errs, 'requires a Standard workflow'));
   });
 });
 
@@ -1489,21 +1410,6 @@ States:
     assert.ok(hasError(errs, '"Method" is required'));
   });
 
-  it('warns when Authentication.ConnectionArn is missing', () => {
-    const errs = lint(`
-StartAt: A
-States:
-  A:
-    Type: Task
-    Resource: arn:aws:states:::http:invoke
-    Parameters:
-      ApiEndpoint: https://api.example.com/path
-      Method: POST
-    End: true
-`);
-    assert.ok(hasError(errs, 'Authentication.ConnectionArn'));
-  });
-
   it('passes when all required fields are present', () => {
     const errs = lint(`
 StartAt: A
@@ -1520,7 +1426,6 @@ States:
 `);
     assert.ok(!hasError(errs, '"ApiEndpoint" is required'));
     assert.ok(!hasError(errs, '"Method" is required'));
-    assert.ok(!hasError(errs, 'Authentication.ConnectionArn'));
   });
 });
 
@@ -1668,21 +1573,6 @@ States:
   });
 });
 
-// ── Succeed/Fail + End redondant ─────────────────────────────────────────────
-
-describe('Succeed/Fail with End is redundant', () => {
-  it('warns End on Succeed', () => {
-    const errs = lint(`
-StartAt: A
-States:
-  A: { Type: Task, Resource: arn, Next: B }
-  B:
-    Type: Succeed
-    End: true
-`);
-    assert.ok(hasError(errs, '"End" is implicit and redundant'));
-  });
-});
 
 // ── Choice + Retry/Catch interdits ───────────────────────────────────────────
 
@@ -1725,93 +1615,6 @@ States:
   });
 });
 
-// ── Map Parameters deprecated ──────────────────────────────────────────────────
-
-describe('Map.Parameters deprecated — use ItemSelector', () => {
-  it('warns when Parameters is used in Map without ItemSelector', () => {
-    const errs = lint(`
-StartAt: M
-States:
-  M:
-    Type: Map
-    Parameters:
-      input.$: $$.Map.Item.Value
-    ItemProcessor:
-      StartAt: C
-      States:
-        C: { Type: Task, Resource: arn, End: true }
-    End: true
-`);
-    assert.ok(hasError(errs, '"Parameters" is deprecated in Map'));
-  });
-
-  it('does not warn when ItemSelector is used', () => {
-    const errs = lint(`
-StartAt: M
-States:
-  M:
-    Type: Map
-    ItemSelector:
-      input.$: $$.Map.Item.Value
-    ItemProcessor:
-      StartAt: C
-      States:
-        C: { Type: Task, Resource: arn, End: true }
-    End: true
-`);
-    assert.ok(!hasError(errs, 'deprecated in Map'));
-  });
-});
-
-// ── Activity ARN sur Express ──────────────────────────────────────────────────
-
-describe('Activity ARN warns Express-incompatible', () => {
-  it('warns for Activity ARN', () => {
-    const errs = lint(`
-StartAt: A
-States:
-  A:
-    Type: Task
-    Resource: arn:aws:states:us-east-1:123456789012:activity:myActivity
-    End: true
-`);
-    assert.ok(hasError(errs, 'Activities are not supported in Express workflows'));
-  });
-
-  it('does not warn for optimized integration ARN', () => {
-    const errs = lint(`
-StartAt: A
-States:
-  A:
-    Type: Task
-    Resource: arn:aws:states:::lambda:invoke
-    End: true
-`);
-    assert.ok(!hasError(errs, 'Activities'));
-  });
-});
-
-// ── Distributed Map sur Express ───────────────────────────────────────────────
-
-describe('Distributed Map warns Express-incompatible', () => {
-  it('warns for DISTRIBUTED mode', () => {
-    const errs = lint(`
-StartAt: M
-States:
-  M:
-    Type: Map
-    ItemProcessor:
-      ProcessorConfig:
-        Mode: DISTRIBUTED
-        ExecutionType: STANDARD
-      StartAt: C
-      States:
-        C: { Type: Task, Resource: arn, End: true }
-    End: true
-`);
-    assert.ok(hasError(errs, 'DISTRIBUTED mode requires a Standard workflow'));
-  });
-});
 
 // ── HTTP Task Method enum validation ────────────────────────────────────────────
 
@@ -2760,6 +2563,247 @@ States:
     End: true
 `);
     assert.ok(!hasError(errs, 'exceeds the maximum limit'));
+  });
+});
+
+// ── CloudFormation intrinsic Resource references ──────────────────────────────
+
+describe('CloudFormation intrinsic Resource — no false positives', () => {
+  it('does not crash or warn for Fn::GetAtt (object form)', () => {
+    const errs = lint(`
+StartAt: A
+States:
+  A:
+    Type: Task
+    Resource:
+      Fn::GetAtt: [MyLambda, Arn]
+    End: true
+`);
+    assert.ok(!hasError(errs, 'not a valid ARN'));
+    assert.ok(!hasError(errs, '"Resource" is required'));
+  });
+
+  it('does not warn for !GetAtt string form (e.g. "MyLambda.Arn")', () => {
+    // yaml strips the !GetAtt tag and produces the plain string "MyLambda.Arn"
+    const errs = lint(`
+StartAt: A
+States:
+  A:
+    Type: Task
+    Resource: MyLambda.Arn
+    End: true
+`);
+    assert.ok(!hasError(errs, 'not a valid ARN'));
+    assert.ok(!hasError(errs, '"Resource" is required'));
+  });
+});
+
+// ── Dynamic values in Timestamp (Wait state) ─────────────────────────────────
+
+describe('Wait state Timestamp — dynamic values skip RFC3339 check', () => {
+  it('does not warn for JSONata expression in Timestamp', () => {
+    const errs = lint(`
+QueryLanguage: JSONata
+StartAt: W
+States:
+  W:
+    Type: Wait
+    Timestamp: "{% $states.input.startAt %}"
+    End: true
+`);
+    assert.ok(!hasError(errs, 'RFC3339'));
+  });
+
+  it('does not warn for JSONPath reference in Timestamp', () => {
+    const errs = lint(`
+StartAt: W
+States:
+  W:
+    Type: Wait
+    Timestamp: $.myTimestamp
+    End: true
+`);
+    assert.ok(!hasError(errs, 'RFC3339'));
+  });
+
+  it('still warns for a malformed static Timestamp', () => {
+    const errs = lint(`
+StartAt: W
+States:
+  W:
+    Type: Wait
+    Timestamp: "2024-01-15 12:00:00"
+    End: true
+`);
+    assert.ok(hasError(errs, 'RFC3339'));
+  });
+});
+
+// ── Dynamic values in Choice Timestamp comparison keys ────────────────────────
+
+describe('Choice TimestampEquals — dynamic values skip RFC3339 check', () => {
+  it('does not warn for JSONata expression in TimestampEquals', () => {
+    const errs = lint(`
+StartAt: C
+States:
+  C:
+    Type: Choice
+    Choices:
+      - Variable: $.date
+        TimestampEquals: "{% $states.input.cutoff %}"
+        Next: End
+    Default: End
+  End: { Type: Succeed }
+`);
+    assert.ok(!hasError(errs, 'RFC3339'));
+  });
+
+  it('does not warn for JSONPath reference in TimestampGreaterThan', () => {
+    const errs = lint(`
+StartAt: C
+States:
+  C:
+    Type: Choice
+    Choices:
+      - Variable: $.date
+        TimestampGreaterThan: $.cutoffDate
+        Next: End
+    Default: End
+  End: { Type: Succeed }
+`);
+    assert.ok(!hasError(errs, 'RFC3339'));
+  });
+});
+
+// ── Dynamic values in HTTP Task Method ───────────────────────────────────────
+
+describe('HTTP Task Method — dynamic values skip method validation', () => {
+  it('does not warn for JSONata expression in Method', () => {
+    const errs = lint(`
+QueryLanguage: JSONata
+StartAt: A
+States:
+  A:
+    Type: Task
+    Resource: arn:aws:states:::http:invoke
+    Arguments:
+      ApiEndpoint: https://example.com/api
+      Method: "{% $states.input.httpMethod %}"
+    End: true
+`);
+    assert.ok(!hasError(errs, 'invalid HTTP method'));
+  });
+
+  it('does not warn for JSONPath reference in Method', () => {
+    const errs = lint(`
+StartAt: A
+States:
+  A:
+    Type: Task
+    Resource: arn:aws:states:::http:invoke
+    Parameters:
+      ApiEndpoint: https://example.com/api
+      Method.$: $.httpMethod
+    End: true
+`);
+    assert.ok(!hasError(errs, 'invalid HTTP method'));
+  });
+
+  it('still warns for an invalid static Method', () => {
+    const errs = lint(`
+StartAt: A
+States:
+  A:
+    Type: Task
+    Resource: arn:aws:states:::http:invoke
+    Parameters:
+      ApiEndpoint: https://example.com/api
+      Method: FETCH
+    End: true
+`);
+    assert.ok(hasError(errs, 'invalid HTTP method'));
+  });
+});
+
+// ── Dynamic values in Retry.JitterStrategy ───────────────────────────────────
+
+describe('JitterStrategy — dynamic values skip enum check', () => {
+  it('does not warn for JSONata expression in JitterStrategy', () => {
+    const errs = lint(`
+QueryLanguage: JSONata
+StartAt: A
+States:
+  A:
+    Type: Task
+    Resource: arn:aws:states:::lambda:invoke
+    Retry:
+      - ErrorEquals: [States.ALL]
+        JitterStrategy: "{% $states.input.strategy %}"
+    End: true
+`);
+    assert.ok(!hasError(errs, 'JitterStrategy'));
+  });
+
+  it('does not warn for JSONPath reference in JitterStrategy', () => {
+    const errs = lint(`
+StartAt: A
+States:
+  A:
+    Type: Task
+    Resource: arn:aws:states:::lambda:invoke
+    Retry:
+      - ErrorEquals: [States.ALL]
+        JitterStrategy: $.jitterStrategy
+    End: true
+`);
+    assert.ok(!hasError(errs, 'JitterStrategy'));
+  });
+});
+
+// ── R-12 dynamic HeartbeatSeconds / TimeoutSeconds ───────────────────────────
+
+describe('R-12: no false positive when HeartbeatSeconds or TimeoutSeconds is dynamic', () => {
+  it('does not warn when both are JSONata expressions', () => {
+    const errs = lint(`
+QueryLanguage: JSONata
+StartAt: A
+States:
+  A:
+    Type: Task
+    Resource: arn:aws:states:::lambda:invoke
+    TimeoutSeconds: "{% $states.input.timeout %}"
+    HeartbeatSeconds: "{% $states.input.heartbeat %}"
+    End: true
+`);
+    assert.ok(!hasError(errs, 'less than TimeoutSeconds'));
+  });
+
+  it('does not warn when HeartbeatSeconds is a JSONPath reference', () => {
+    const errs = lint(`
+StartAt: A
+States:
+  A:
+    Type: Task
+    Resource: arn:aws:states:::lambda:invoke
+    TimeoutSeconds: 60
+    HeartbeatSeconds: $.heartbeat
+    End: true
+`);
+    assert.ok(!hasError(errs, 'less than TimeoutSeconds'));
+  });
+
+  it('still warns when both are static numbers and heartbeat >= timeout', () => {
+    const errs = lint(`
+StartAt: A
+States:
+  A:
+    Type: Task
+    Resource: arn
+    TimeoutSeconds: 30
+    HeartbeatSeconds: 30
+    End: true
+`);
+    assert.ok(hasError(errs, 'less than TimeoutSeconds'));
   });
 });
 

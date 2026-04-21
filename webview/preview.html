@@ -112,7 +112,7 @@
 
   <div id="hint">Scroll to zoom · Drag to pan · Click node to jump{{HINT_SUBGRAPHS}}</div>
 
-  <script>
+  <script nonce="{{NONCE}}">
     // ── Fatal error fallback ──────────────────────────────────────────────
     function showFatalError(err) {
       const detail = String(err) +
@@ -280,7 +280,7 @@
         elements: buildElements(tab.data),
         style: CY_STYLE,
         layout: LAYOUT,
-        wheelSensitivity: 0.3,
+        wheelSensitivity: 0.5,
         minZoom: 0.15,
         maxZoom: 3,
       });
@@ -303,6 +303,17 @@
       });
 
       instances[tab.id] = cy;
+    });
+
+    // ── Initial fit after browser layout pass ─────────────────────────────
+    // The script may run before the browser has completed the flex layout,
+    // so Cytoscape can read 0×0 dimensions. requestAnimationFrame fires
+    // after the first paint, guaranteeing real container sizes.
+    requestAnimationFrame(() => {
+      Object.entries(instances).forEach(([id, cy]) => {
+        cy.resize();
+        if (id === activeTabId) cy.fit(undefined, 40);
+      });
     });
 
     // ── Tab switching ─────────────────────────────────────────────────────
@@ -362,20 +373,26 @@
         msg.tabs.forEach(tab => {
           const cy = instances[tab.id];
           if (!cy) return;
-          const zoom = cy.zoom();
-          const pan  = cy.pan();
           cy.elements().remove();
           cy.add(buildElements(tab.data));
           cy.layout(LAYOUT).run();
-          cy.viewport({ zoom, pan });
+          if (tab.id === activeTabId) cy.fit(undefined, 40);
         });
         // Sync the navigation map in case a state was renamed
         Object.keys(NODE_TO_TAB).forEach(k => delete NODE_TO_TAB[k]);
         Object.assign(NODE_TO_TAB, msg.nodeToTab);
 
       } else if (msg.type === 'resize') {
-        instances[activeTabId]?.resize();
-        instances[activeTabId]?.fit(undefined, 40);
+        Object.entries(instances).forEach(([id, cy]) => {
+          const container = cy.container();
+          if (!container) return;
+          const hadZeroDimensions = container.clientWidth < 1 || container.clientHeight < 1;
+          cy.resize();
+          // If the layout ran when this container had 0×0 dimensions, re-run it
+          // now that the container has a real size, then fit.
+          if (hadZeroDimensions) cy.layout(LAYOUT).run();
+          if (id === activeTabId) cy.fit(undefined, 40);
+        });
       }
     });
 
