@@ -184,6 +184,88 @@ export class AslParser {
         }
       }
 
+      // ── CloudFormation / SAM template ──────────────────────────────────────
+      // Supported:
+      //   AWS::StepFunctions::StateMachine  — Definition (object), DefinitionString
+      //   AWS::Serverless::StateMachine     — Definition (map), DefinitionUri (local path only)
+      //
+      // Not supported (cannot resolve without external access):
+      //   DefinitionS3Location / DefinitionUri pointing to S3
+      //   DefinitionUri pointing to a local file (requires async file I/O)
+      if (raw.Resources && typeof raw.Resources === 'object' && !Array.isArray(raw.Resources)) {
+        for (const resource of Object.values(raw.Resources as Record<string, unknown>)) {
+          const r = resource as Record<string, unknown>;
+          if (
+            r?.Type !== 'AWS::StepFunctions::StateMachine' &&
+            r?.Type !== 'AWS::Serverless::StateMachine'
+          ) continue;
+
+          const props = r?.Properties as Record<string, unknown> | undefined;
+          if (!props) continue;
+
+          // 1. Inline Definition object  { StartAt, States }
+          //    Works for both CF and SAM.  DefinitionSubstitutions use ${placeholder}
+          //    syntax which our ARN validator already skips for non-literal values.
+          if (isStatesObj((props.Definition as Record<string, unknown>)?.States)) {
+            return { definition: props.Definition as AslDefinition, isWrapped: true };
+          }
+
+          // Helper: normalise a CF-resolved string — replace every ${Var} or
+          // intrinsic-function object token with the placeholder __CF_REF__ so
+          // that JSON.parse can still succeed.
+          const stripCfRefs = (s: string) => s.replace(/\$\{[^}]+\}/g, '__CF_REF__');
+
+          // Helper: resolve a CF token to a plain string best-effort.
+          // Returns the string as-is, a __CF_REF__ placeholder for intrinsic
+          // function objects, or null when the value cannot be reduced.
+          const resolveToken = (token: unknown): string | null => {
+            if (typeof token === 'string') return token;
+            if (token && typeof token === 'object' && !Array.isArray(token)) return '__CF_REF__';
+            return null;
+          };
+
+          // 2. DefinitionString as a plain JSON string
+          if (typeof props.DefinitionString === 'string') {
+            try {
+              const def = JSON.parse(props.DefinitionString) as unknown as AslDefinition;
+              if (isStatesObj(def.States)) return { definition: def, isWrapped: true };
+            } catch { /* not valid JSON */ }
+          }
+
+          if (props.DefinitionString && typeof props.DefinitionString === 'object') {
+            const ds = props.DefinitionString as Record<string, unknown>;
+
+            // 3. DefinitionString: { Fn::Sub: "…" }
+            //    Strip ${Variable} refs so JSON.parse can succeed.
+            if (typeof ds['Fn::Sub'] === 'string') {
+              try {
+                const def = JSON.parse(
+                  stripCfRefs(ds['Fn::Sub'] as string)
+                ) as unknown as AslDefinition;
+                if (isStatesObj(def.States)) return { definition: def, isWrapped: true };
+              } catch { /* substitutions made it unparseable */ }
+            }
+
+            // 4. DefinitionString: { Fn::Join: [sep, [item, …]] }
+            //    Documented in CF examples (common for multi-line definitions).
+            //    Each item may be a plain string or a CF intrinsic (→ __CF_REF__).
+            if (Array.isArray(ds['Fn::Join']) && (ds['Fn::Join'] as unknown[]).length === 2) {
+              const [sep, items] = ds['Fn::Join'] as unknown[];
+              if (typeof sep === 'string' && Array.isArray(items)) {
+                const parts = (items as unknown[]).map(resolveToken).filter((p): p is string => p !== null);
+                if (parts.length === (items as unknown[]).length) {
+                  try {
+                    const joined = parts.join(sep);
+                    const def = JSON.parse(stripCfRefs(joined)) as unknown as AslDefinition;
+                    if (isStatesObj(def.States)) return { definition: def, isWrapped: true };
+                  } catch { /* joined string is not valid JSON */ }
+                }
+              }
+            }
+          }
+        }
+      }
+
       return null;
     } catch {
       return null;
@@ -334,6 +416,59 @@ export class AslParser {
    * Collect every state name at every nesting level (top-level + all
    * Parallel branches and Map iterators), deduplicated.
    */
+  /**
+   * Detect cycles that contain no Choice state — those loops have no
+   * conditional exit and will run forever (W-5).
+   *
+   * Returns one array per detected infinite cycle, each array listing the
+   * state names that form the loop (in traversal order).
+   *
+   * Cycles that include at least one Choice state are intentional polling
+   * loops and are NOT reported.
+   */
+  static findInfiniteCycles(def: AslDefinition): string[][] {
+    const states = def.States;
+    // 0 = unvisited, 1 = on current DFS path (gray), 2 = fully processed (black)
+    const color = new Map<string, 0 | 1 | 2>();
+    const path: string[] = [];
+    const cycles: string[][] = [];
+
+    const successors = (name: string): string[] => {
+      const s = states[name];
+      if (!s) return [];
+      const out: string[] = [];
+      if (s.Next)    out.push(s.Next);
+      if (s.Default) out.push(s.Default);
+      s.Choices?.forEach(c => { if (c.Next) out.push(c.Next); });
+      return out.filter(n => n in states);
+    };
+
+    const dfs = (name: string) => {
+      const c = color.get(name) ?? 0;
+      if (c === 2) return;                // already fully processed
+      if (c === 1) {                      // back edge → cycle found
+        const idx = path.indexOf(name);
+        if (idx >= 0) {
+          const cycle = path.slice(idx);
+          if (!cycle.some(n => states[n]?.Type === 'Choice')) {
+            cycles.push([...cycle]);
+          }
+        }
+        return;
+      }
+      color.set(name, 1);
+      path.push(name);
+      for (const next of successors(name)) dfs(next);
+      path.pop();
+      color.set(name, 2);
+    };
+
+    for (const name of Object.keys(states)) {
+      if (!color.has(name)) dfs(name);
+    }
+    return cycles;
+  }
+
   static allStateNames(def: AslDefinition): string[] {
     const names = new Set<string>();
     const walk = (states: Record<string, AslState>) => {

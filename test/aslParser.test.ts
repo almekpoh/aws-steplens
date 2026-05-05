@@ -472,3 +472,181 @@ myMachine:
     assert.strictEqual(r.definition.QueryLanguage, 'JSONata');
   });
 });
+
+// ── findInfiniteCycles() ─────────────────────────────────────────────────────
+
+describe('AslParser.findInfiniteCycles()', () => {
+  it('returns empty array when no cycle exists', () => {
+    const cycles = AslParser.findInfiniteCycles({
+      StartAt: 'A',
+      States: {
+        A: { Type: 'Task', Resource: 'arn', Next: 'B' },
+        B: { Type: 'Task', Resource: 'arn', End: true },
+      },
+    });
+    assert.strictEqual(cycles.length, 0);
+  });
+
+  it('detects a simple A→B→A infinite cycle', () => {
+    const cycles = AslParser.findInfiniteCycles({
+      StartAt: 'A',
+      States: {
+        A: { Type: 'Task', Resource: 'arn', Next: 'B' },
+        B: { Type: 'Task', Resource: 'arn', Next: 'A' },
+      },
+    });
+    assert.strictEqual(cycles.length, 1);
+    assert.ok(cycles[0].includes('A') && cycles[0].includes('B'));
+  });
+
+  it('does NOT flag a cycle containing a Choice state (polling loop)', () => {
+    const cycles = AslParser.findInfiniteCycles({
+      StartAt: 'Poll',
+      States: {
+        Poll:   { Type: 'Task', Resource: 'arn', Next: 'Check' },
+        Check:  { Type: 'Choice', Choices: [{ Variable: '$.done', Next: 'Done' }], Default: 'Wait' },
+        Wait:   { Type: 'Wait', Seconds: 10, Next: 'Poll' },
+        Done:   { Type: 'Succeed' },
+      },
+    });
+    assert.strictEqual(cycles.length, 0, 'polling loop with Choice should not be flagged');
+  });
+
+  it('detects a self-loop (A→A)', () => {
+    const cycles = AslParser.findInfiniteCycles({
+      StartAt: 'A',
+      States: {
+        A: { Type: 'Task', Resource: 'arn', Next: 'A' },
+      },
+    });
+    assert.strictEqual(cycles.length, 1);
+    assert.deepStrictEqual(cycles[0], ['A']);
+  });
+});
+
+// ── parse() — CloudFormation / SAM ──────────────────────────────────────────
+
+describe('AslParser.parse() — CloudFormation / SAM', () => {
+  it('parses AWS::StepFunctions::StateMachine with inline Definition (YAML)', () => {
+    const yaml = `
+AWSTemplateFormatVersion: '2010-09-09'
+Resources:
+  MyMachine:
+    Type: AWS::StepFunctions::StateMachine
+    Properties:
+      Definition:
+        StartAt: A
+        States:
+          A:
+            Type: Task
+            Resource: arn:aws:lambda:::function:foo
+            End: true
+`;
+    const r = AslParser.parse(yaml, 'yaml');
+    assert.ok(r, 'should detect CF inline Definition');
+    assert.strictEqual(r!.isWrapped, true);
+    assert.strictEqual(r!.definition.StartAt, 'A');
+  });
+
+  it('parses AWS::StepFunctions::StateMachine with DefinitionString JSON', () => {
+    const json = JSON.stringify({
+      AWSTemplateFormatVersion: '2010-09-09',
+      Resources: {
+        MyMachine: {
+          Type: 'AWS::StepFunctions::StateMachine',
+          Properties: {
+            DefinitionString: JSON.stringify({
+              StartAt: 'Hello',
+              States: { Hello: { Type: 'Pass', End: true } },
+            }),
+          },
+        },
+      },
+    });
+    const r = AslParser.parse(json, 'json');
+    assert.ok(r, 'should detect CF DefinitionString');
+    assert.strictEqual(r!.definition.StartAt, 'Hello');
+  });
+
+  it('parses AWS::Serverless::StateMachine with inline Definition', () => {
+    const yaml = `
+Transform: AWS::Serverless-2016-10-31
+Resources:
+  MyMachine:
+    Type: AWS::Serverless::StateMachine
+    Properties:
+      Definition:
+        StartAt: S
+        States:
+          S:
+            Type: Succeed
+`;
+    const r = AslParser.parse(yaml, 'yaml');
+    assert.ok(r, 'should detect SAM StateMachine');
+    assert.strictEqual(r!.definition.StartAt, 'S');
+  });
+
+  it('parses CF DefinitionString with Fn::Sub substitutions', () => {
+    const yaml = `
+Resources:
+  MyMachine:
+    Type: AWS::StepFunctions::StateMachine
+    Properties:
+      DefinitionString:
+        Fn::Sub: |
+          {
+            "StartAt": "Invoke",
+            "States": {
+              "Invoke": {
+                "Type": "Task",
+                "Resource": "\${MyLambda.Arn}",
+                "End": true
+              }
+            }
+          }
+`;
+    const r = AslParser.parse(yaml, 'yaml');
+    assert.ok(r, 'should parse Fn::Sub DefinitionString');
+    assert.strictEqual(r!.definition.StartAt, 'Invoke');
+  });
+
+  it('parses CF DefinitionString with Fn::Join', () => {
+    const def = {
+      AWSTemplateFormatVersion: '2010-09-09',
+      Resources: {
+        MyMachine: {
+          Type: 'AWS::StepFunctions::StateMachine',
+          Properties: {
+            DefinitionString: {
+              'Fn::Join': [
+                '\n',
+                [
+                  '{',
+                  '"StartAt": "A",',
+                  '"States": {',
+                  '"A": { "Type": "Pass", "End": true }',
+                  '}',
+                  '}',
+                ],
+              ],
+            },
+          },
+        },
+      },
+    };
+    const r = AslParser.parse(JSON.stringify(def), 'json');
+    assert.ok(r, 'should parse Fn::Join DefinitionString');
+    assert.strictEqual(r!.definition.StartAt, 'A');
+  });
+
+  it('returns null for a CF template with no state machine resources', () => {
+    const yaml = `
+AWSTemplateFormatVersion: '2010-09-09'
+Resources:
+  MyBucket:
+    Type: AWS::S3::Bucket
+`;
+    const r = AslParser.parse(yaml, 'yaml');
+    assert.strictEqual(r, null);
+  });
+});

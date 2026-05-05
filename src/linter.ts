@@ -968,6 +968,18 @@ export class AslLinter {
       }
     }
 
+    // ── W-5: Infinite loop detection ─────────────────────────────────────────
+    // Cycles that contain no Choice state have no conditional exit and will
+    // run forever.  Warn once per cycle on the entry-point state.
+    for (const cycle of AslParser.findInfiniteCycles(def)) {
+      const cycleStr = [...cycle, cycle[0]].join(' → ');
+      errors.push({
+        message: `infinite loop — no Choice state can break out: ${cycleStr}`,
+        severity: vscode.DiagnosticSeverity.Warning,
+        searchKey: cycle[0],
+      });
+    }
+
     return errors;
   }
 }

@@ -2,6 +2,34 @@
 
 ---
 
+## [0.2.2] — 2026-05-05
+
+### Added
+
+**Parser — CloudFormation / SAM template support**
+
+The parser now detects Step Functions state machines embedded in CloudFormation and SAM templates:
+
+- `AWS::StepFunctions::StateMachine` with inline `Definition` object
+- `AWS::StepFunctions::StateMachine` with `DefinitionString` as a plain JSON string
+- `AWS::StepFunctions::StateMachine` with `DefinitionString: { Fn::Sub: "..." }` — `${Variable}` substitution tokens are replaced with a placeholder so JSON.parse succeeds
+- `AWS::StepFunctions::StateMachine` with `DefinitionString: { Fn::Join: [...] }` — items joined before parsing
+- `AWS::Serverless::StateMachine` (SAM) with inline `Definition`
+
+Not yet supported: `DefinitionUri` pointing to a local file (requires async file I/O).
+
+**Linter — W-5: Infinite loop detection**
+
+Cycles that contain no `Choice` state have no conditional exit and will run forever. The linter now emits a Warning for each such cycle, pointing to the entry-point state and listing the full loop path (e.g. `A → B → A`).
+
+Cycles that include at least one `Choice` state are intentional polling loops and are not flagged.
+
+### Tests
+
+- 225 unit tests (up from 181) — full coverage for CF/SAM parsing and infinite loop detection
+
+---
+
 ## [0.2.1] — 2026-04-21
 
 ### Fixed
