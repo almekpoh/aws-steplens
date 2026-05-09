@@ -1,6 +1,6 @@
-# StepLens — AWS Step Functions for VS Code
+# StepLens — AWS Step Functions
 
-Visualize, navigate and lint **AWS Step Functions** definitions (ASL) directly in VS Code.
+Visualize, navigate and lint **AWS Step Functions** definitions (ASL) directly in your editor.
 Supports **YAML** (Serverless Framework), raw **JSON**, and **JSONata** query language.
 
 ![StepLens Preview](images/preview.png)
