@@ -62,7 +62,7 @@
       position: fixed; top: 46px; right: 10px;
       background: rgba(20,20,20,0.92); border: 1px solid #333; border-radius: 6px;
       padding: 8px 12px; font-size: 11px; color: #aaa; line-height: 1.9;
-      min-width: 145px;
+      min-width: 145px; /* position:fixed already establishes a containing block for #legend-close */
     }
     #legend.hidden { display: none; }
     #legend-close {
@@ -96,7 +96,7 @@
     {{PANES}}
   </div>
 
-  <div id="legend" style="position:relative">
+  <div id="legend">
     <button id="legend-close" title="Hide legend">×</button>
     <div style="font-size:10px;color:#666;margin-bottom:3px;text-transform:uppercase;letter-spacing:.5px">States</div>
     <div class="leg"><span class="dot" style="background:#1e4080;border:1.5px solid #4a9de8"></span>Task</div>

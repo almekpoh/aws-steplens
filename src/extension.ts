@@ -306,9 +306,12 @@ export function activate(context: vscode.ExtensionContext) {
     })
   );
 
-  // ── Clear diagnostics on close ─────────────────────────────────────────────
+  // ── Clear diagnostics and cache on close ──────────────────────────────────
   context.subscriptions.push(
-    vscode.workspace.onDidCloseTextDocument(doc => diagnostics.delete(doc.uri))
+    vscode.workspace.onDidCloseTextDocument(doc => {
+      diagnostics.delete(doc.uri);
+      _docCache.delete(doc.uri.toString());
+    })
   );
 
   // ── React to settings changes ──────────────────────────────────────────────
