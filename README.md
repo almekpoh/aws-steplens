@@ -21,6 +21,7 @@ Open a live graph of your state machine with a single click on the ⊤ toolbar i
 - **← Main** back button appears automatically when browsing a sub-graph
 - **⊡ Fit** button recenters the graph at any time
 - **Export** the current view as PNG or JPEG
+- **☰ Legend** toggle button in the toolbar — hide or show the legend panel; `×` button on the panel itself also closes it
 
 ### Node annotations
 
@@ -36,6 +37,15 @@ Open a live graph of your state machine with a single click on the ⊤ toolbar i
 | Purple dashed border | Parallel / Map — double-click to explore the sub-graph |
 | Orange highlight | State at cursor position |
 | Red dashed border + `(not found)` | Broken reference — a `Next`, `Default`, `Catch`, or `Choices` target that does not exist in `States` |
+
+### Language features
+
+| Feature | How to use |
+|---------|-----------|
+| **IntelliSense** | Type `Next: `, `Default: `, or `StartAt: ` (YAML) / `"Next": "` (JSON) → autocomplete dropdown lists every state in the file |
+| **Rename state** | Press `F2` (or right-click → Rename Symbol) on any state name — declaration or reference — to rename it and update every `Next`, `Default`, `StartAt`, `Catch[].Next`, and `Choices[].Next` reference atomically |
+| **Quick Fix** | When the linter flags a broken reference (`Next "Foo" not found`), click the lightbulb to pick a replacement from the closest existing state names — all occurrences are updated in one edit |
+| **Document highlights** | Place the cursor on any state name → all occurrences are highlighted; use `Ctrl+F2` / `Cmd+F2` to change all at once |
 
 ### Real-time Linter
 
@@ -298,6 +308,23 @@ definition:
 ```
 
 > **Tip:** Double-click the `EnrichUser` node in the graph to explore each branch in a dedicated tab. The node label shows **‖2** (2 branches).
+
+### SAM template with `DefinitionUri`
+
+StepLens automatically resolves the local file referenced by `DefinitionUri` in `AWS::Serverless::StateMachine` resources — the linter, graph preview, and all commands work directly on the SAM template.
+
+```yaml
+Resources:
+  MyStateMachine:
+    Type: AWS::Serverless::StateMachine
+    Properties:
+      DefinitionUri: statemachine/my_machine.asl.yaml
+      Policies:
+        - LambdaInvokePolicy:
+            FunctionName: !Ref MyFunction
+```
+
+> S3 `DefinitionUri` objects (`{ Bucket, Key }`) are not supported — only local file paths.
 
 ### Map iterator
 

@@ -650,3 +650,318 @@ Resources:
     assert.strictEqual(r, null);
   });
 });
+
+// ── extractDefinitionUri() ────────────────────────────────────────────────────
+
+describe('AslParser.extractDefinitionUri()', () => {
+  const samTemplate = (defVal: unknown) => {
+    const template = {
+      AWSTemplateFormatVersion: '2010-09-09',
+      Transform: 'AWS::Serverless-2016-10-31',
+      Resources: {
+        MyMachine: {
+          Type: 'AWS::Serverless::StateMachine',
+          Properties: {
+            DefinitionUri: defVal,
+          },
+        },
+      },
+    };
+    return JSON.stringify(template);
+  };
+
+  it('returns the relative path for a local DefinitionUri string', () => {
+    const result = AslParser.extractDefinitionUri(
+      samTemplate('statemachine/order.asl.json'),
+      'json',
+    );
+    assert.strictEqual(result, 'statemachine/order.asl.json');
+  });
+
+  it('returns null for an S3 DefinitionUri string', () => {
+    const result = AslParser.extractDefinitionUri(
+      samTemplate('s3://my-bucket/order.asl.json'),
+      'json',
+    );
+    assert.strictEqual(result, null);
+  });
+
+  it('returns null for an S3 DefinitionUri object { Bucket, Key }', () => {
+    const result = AslParser.extractDefinitionUri(
+      samTemplate({ Bucket: 'my-bucket', Key: 'order.asl.json' }),
+      'json',
+    );
+    assert.strictEqual(result, null);
+  });
+
+  it('returns null for inline Definition (no DefinitionUri)', () => {
+    const template = JSON.stringify({
+      Resources: {
+        M: {
+          Type: 'AWS::Serverless::StateMachine',
+          Properties: {
+            Definition: { StartAt: 'A', States: { A: { Type: 'Succeed' } } },
+          },
+        },
+      },
+    });
+    assert.strictEqual(AslParser.extractDefinitionUri(template, 'json'), null);
+  });
+
+  it('returns null for AWS::StepFunctions::StateMachine (DefinitionUri not supported)', () => {
+    const template = JSON.stringify({
+      Resources: {
+        M: {
+          Type: 'AWS::StepFunctions::StateMachine',
+          Properties: { DefinitionUri: 'statemachine/order.asl.json' },
+        },
+      },
+    });
+    assert.strictEqual(AslParser.extractDefinitionUri(template, 'json'), null);
+  });
+
+  it('parses a YAML SAM template', () => {
+    const yaml = `
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Resources:
+  MyMachine:
+    Type: AWS::Serverless::StateMachine
+    Properties:
+      DefinitionUri: statemachine/order.asl.yaml
+`;
+    const result = AslParser.extractDefinitionUri(yaml, 'yaml');
+    assert.strictEqual(result, 'statemachine/order.asl.yaml');
+  });
+
+  it('returns null for a non-template file', () => {
+    assert.strictEqual(
+      AslParser.extractDefinitionUri('StartAt: A\nStates:\n  A: {Type: Succeed}', 'yaml'),
+      null,
+    );
+  });
+});
+
+// ── parseWithDefinitionUri() ──────────────────────────────────────────────────
+
+describe('AslParser.parseWithDefinitionUri()', () => {
+  const ASL_CONTENT = JSON.stringify({
+    StartAt: 'DoWork',
+    States: { DoWork: { Type: 'Task', Resource: 'arn:aws:lambda:::fn', End: true } },
+  });
+
+  const SAM_TEMPLATE_YAML = `
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Resources:
+  MyMachine:
+    Type: AWS::Serverless::StateMachine
+    Properties:
+      DefinitionUri: statemachine/order.asl.json
+`;
+
+  it('resolves DefinitionUri and parses the referenced file', async () => {
+    const readFile = async (path: string) => {
+      assert.strictEqual(path, 'statemachine/order.asl.json');
+      return ASL_CONTENT;
+    };
+    const result = await AslParser.parseWithDefinitionUri(SAM_TEMPLATE_YAML, 'yaml', readFile);
+    assert.ok(result, 'expected a parsed definition');
+    assert.strictEqual(result.definition.StartAt, 'DoWork');
+    assert.ok(result.isWrapped);
+  });
+
+  it('returns the inline definition directly without calling readFile', async () => {
+    const readFile = async (_path: string): Promise<string> => {
+      throw new Error('readFile should not be called for inline definitions');
+    };
+    const inlineYaml = `
+StartAt: A
+States:
+  A: { Type: Succeed }
+`;
+    const result = await AslParser.parseWithDefinitionUri(inlineYaml, 'yaml', readFile);
+    assert.ok(result);
+    assert.strictEqual(result.definition.StartAt, 'A');
+  });
+
+  it('returns null when readFile throws (file not found)', async () => {
+    const readFile = async (_path: string): Promise<string> => {
+      throw new Error('ENOENT');
+    };
+    const result = await AslParser.parseWithDefinitionUri(SAM_TEMPLATE_YAML, 'yaml', readFile);
+    assert.strictEqual(result, null);
+  });
+
+  it('returns null when the referenced file is not valid ASL', async () => {
+    const readFile = async (_path: string) => '{"not": "asl"}';
+    const result = await AslParser.parseWithDefinitionUri(SAM_TEMPLATE_YAML, 'yaml', readFile);
+    assert.strictEqual(result, null);
+  });
+
+  it('infers yaml language from .asl.yaml extension', async () => {
+    const samYaml = `
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Resources:
+  M:
+    Type: AWS::Serverless::StateMachine
+    Properties:
+      DefinitionUri: sm/machine.asl.yaml
+`;
+    const aslYaml = 'StartAt: A\nStates:\n  A:\n    Type: Succeed\n';
+    const readFile = async (_path: string) => aslYaml;
+    const result = await AslParser.parseWithDefinitionUri(samYaml, 'yaml', readFile);
+    assert.ok(result);
+    assert.strictEqual(result.definition.StartAt, 'A');
+  });
+});
+
+// ── findStateNameOccurrences() ────────────────────────────────────────────────
+
+describe('AslParser.findStateNameOccurrences()', () => {
+  // YAML fixture
+  const YAML_LINES = `
+StartAt: ValidateInput
+States:
+  ValidateInput:
+    Type: Task
+    Resource: arn
+    Next: ProcessOrder
+    Catch:
+      - ErrorEquals: [States.ALL]
+        Next: HandleError
+  ProcessOrder:
+    Type: Task
+    Resource: arn
+    Next: HandleError
+  HandleError:
+    Type: Fail
+`.trimStart().split('\n');
+
+  // JSON fixture
+  const JSON_LINES = `{
+  "StartAt": "ValidateInput",
+  "States": {
+    "ValidateInput": {
+      "Type": "Task",
+      "Next": "ProcessOrder"
+    },
+    "ProcessOrder": {
+      "Type": "Task",
+      "Next": "HandleError"
+    },
+    "HandleError": {
+      "Type": "Fail"
+    }
+  }
+}`.split('\n');
+
+  it('finds declaration + all Next references for a YAML file', () => {
+    const hits = AslParser.findStateNameOccurrences(YAML_LINES, 'HandleError');
+    // declaration on line 14 ("  HandleError:")
+    // Next reference on line 9 ("        Next: HandleError" in Catch)
+    // Next reference on line 13 ("    Next: HandleError" in ProcessOrder)
+    assert.strictEqual(hits.length, 3);
+  });
+
+  it('finds StartAt reference in YAML', () => {
+    const hits = AslParser.findStateNameOccurrences(YAML_LINES, 'ValidateInput');
+    // StartAt: ValidateInput (line 0) + declaration (line 3)
+    assert.strictEqual(hits.length, 2);
+  });
+
+  it('returns the correct character range for a YAML declaration', () => {
+    const hits = AslParser.findStateNameOccurrences(YAML_LINES, 'ProcessOrder');
+    const decl = hits.find(h => YAML_LINES[h.line].includes('ProcessOrder:'));
+    assert.ok(decl, 'declaration not found');
+    assert.strictEqual(YAML_LINES[decl.line].slice(decl.start, decl.end), 'ProcessOrder');
+  });
+
+  it('returns the correct character range for a YAML Next value', () => {
+    const hits = AslParser.findStateNameOccurrences(YAML_LINES, 'ProcessOrder');
+    const ref = hits.find(h => YAML_LINES[h.line].includes('Next: ProcessOrder'));
+    assert.ok(ref, 'Next reference not found');
+    assert.strictEqual(YAML_LINES[ref.line].slice(ref.start, ref.end), 'ProcessOrder');
+  });
+
+  it('finds declaration + all references in a JSON file', () => {
+    const hits = AslParser.findStateNameOccurrences(JSON_LINES, 'HandleError');
+    // declaration ("HandleError": {), Next in ProcessOrder, StartAt is not HandleError
+    assert.ok(hits.length >= 2);
+    for (const h of hits) {
+      assert.strictEqual(JSON_LINES[h.line].slice(h.start, h.end), 'HandleError');
+    }
+  });
+
+  it('returns the correct range for a JSON declaration', () => {
+    const hits = AslParser.findStateNameOccurrences(JSON_LINES, 'ValidateInput');
+    const decl = hits.find(h => JSON_LINES[h.line].includes('"ValidateInput": {'));
+    assert.ok(decl, 'declaration not found');
+    assert.strictEqual(JSON_LINES[decl.line].slice(decl.start, decl.end), 'ValidateInput');
+  });
+
+  it('returns the correct range for a JSON value', () => {
+    const hits = AslParser.findStateNameOccurrences(JSON_LINES, 'ProcessOrder');
+    const ref = hits.find(h => JSON_LINES[h.line].includes('"Next": "ProcessOrder"'));
+    assert.ok(ref, 'Next reference not found');
+    assert.strictEqual(JSON_LINES[ref.line].slice(ref.start, ref.end), 'ProcessOrder');
+  });
+
+  it('returns empty array for a name that does not exist', () => {
+    assert.deepStrictEqual(
+      AslParser.findStateNameOccurrences(YAML_LINES, 'GhostState'),
+      [],
+    );
+  });
+
+  it('does not match a substring of another state name', () => {
+    // 'Handle' should not match inside 'HandleError'
+    const hits = AslParser.findStateNameOccurrences(YAML_LINES, 'Handle');
+    assert.strictEqual(hits.length, 0);
+  });
+});
+
+// ── stateNameAtPosition() ─────────────────────────────────────────────────────
+
+describe('AslParser.stateNameAtPosition()', () => {
+  const LINES = `
+StartAt: ValidateInput
+States:
+  ValidateInput:
+    Type: Task
+    Next: ProcessOrder
+`.trimStart().split('\n');
+
+  const NAMES = ['ValidateInput', 'ProcessOrder'];
+
+  it('detects a state name when cursor is within the declaration', () => {
+    // line 2: "  ValidateInput:"
+    const decl = LINES[2];
+    const col = decl.indexOf('ValidateInput') + 3; // middle of the name
+    const hit = AslParser.stateNameAtPosition(LINES, 2, col, NAMES);
+    assert.ok(hit);
+    assert.strictEqual(hit.name, 'ValidateInput');
+  });
+
+  it('detects a state name when cursor is within a Next reference', () => {
+    // line 4: "    Next: ProcessOrder"
+    const ref = LINES[4];
+    const col = ref.indexOf('ProcessOrder') + 4;
+    const hit = AslParser.stateNameAtPosition(LINES, 4, col, NAMES);
+    assert.ok(hit);
+    assert.strictEqual(hit.name, 'ProcessOrder');
+  });
+
+  it('returns null when cursor is on a keyword (Next), not a state name', () => {
+    // line 4: "    Next: ProcessOrder" — cursor on "Next" (col 4)
+    const hit = AslParser.stateNameAtPosition(LINES, 4, 4, NAMES);
+    assert.strictEqual(hit, null);
+  });
+
+  it('returns null on an unrelated line', () => {
+    // line 3: "    Type: Task"
+    const hit = AslParser.stateNameAtPosition(LINES, 3, 10, NAMES);
+    assert.strictEqual(hit, null);
+  });
+});

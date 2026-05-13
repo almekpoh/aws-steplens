@@ -2,6 +2,55 @@
 
 ---
 
+## [0.3.0] — 2026-05-14
+
+### Added
+
+**Language — IntelliSense: state name completion**
+
+Typing `Next: `, `Default: `, or `StartAt: ` in YAML (or `"Next": "` etc. in JSON) triggers an autocomplete dropdown listing every state defined in the file. Prevents broken references before the linter even fires. Works on both raw ASL and CloudFormation/SAM inline definitions.
+
+**Language — Rename state**
+
+F2 (or right-click → Rename Symbol) on any valid state name — declaration or reference — renames it and updates every `Next`, `Default`, `StartAt`, `Catch[].Next`, and `Choices[].Next` reference in the file atomically. No linter error required — works proactively on any existing state name.
+
+- Works on YAML and JSON ASL files.
+- `prepareRename` validates the cursor is on a state name and pre-fills the rename input with the current name.
+- Not available on SAM/CF template files that use `DefinitionUri` (rename from the referenced ASL file directly).
+
+**Language — Quick Fix: fix broken state reference**
+
+Complements Rename (F2): whereas Rename works proactively on valid state names, Quick Fix kicks in after the fact — when the linter flags a broken state reference (`Next "Foo" not found`, `Default "Foo" not found`, `Choices[N].Next "Foo" not found`, `StartAt "Foo" does not exist`), a Quick Fix lightbulb appears on the error line. Clicking it proposes up to three replacement candidates ranked by Levenshtein distance to the broken name. Selecting one renames every occurrence of the broken name (all `Next`, `Default`, `StartAt`, `Catch[].Next`, `Choices[].Next` references) in a single atomic edit — without needing to know the exact correct name upfront.
+
+**Language — Document highlights**
+
+Placing the cursor on any state name automatically highlights every occurrence of that name in the file (declaration + all `Next`, `Default`, `StartAt`, `Catch[].Next`, `Choices[].Next` references). Backed by `DocumentHighlightProvider`; works with the editor's built-in "Change All Occurrences" command (`Ctrl+F2` / `Cmd+F2`).
+
+**Parser — SAM `DefinitionUri` local file support**
+
+`AWS::Serverless::StateMachine` resources with a `DefinitionUri` pointing to a local file are now fully supported:
+
+- The linter, graph preview, and all commands (`StepLens: Open Graph Preview`, `StepLens: Lint Current File`) work on the SAM template directly — StepLens reads the referenced `.asl.json` or `.asl.yaml` file automatically.
+- The toolbar icon and `steplens.isSfnFile` context key are set correctly for template files that use `DefinitionUri`.
+- Unsupported forms (S3 `DefinitionUri`, `{ Bucket, Key }` objects, `AWS::StepFunctions::StateMachine`) are silently skipped; inline `Definition` objects continue to work as before.
+- External file changes are picked up on the next save of the template file.
+
+**Graph preview — Legend toggle**
+
+The legend panel can now be hidden or shown via a `☰ Legend` button in the toolbar (active = visible, dimmed = hidden). A `×` button on the legend itself also closes it directly. State persists within the session.
+
+**Infrastructure**
+
+- `AslParser.extractDefinitionUri(text, languageId)` — sync helper that returns the relative path from `DefinitionUri`, or `null`.
+- `AslParser.parseWithDefinitionUri(text, languageId, readFile)` — async entry-point that tries inline parse first, then resolves `DefinitionUri` via an injected `readFile` callback (testable without VS Code).
+- Per-document async parse cache in `extension.ts` — `(uri, version)` keyed, prevents redundant file I/O on cursor moves.
+
+### Tests
+
+- 250 unit tests (up from 225) — new tests covering `extractDefinitionUri` and `parseWithDefinitionUri` (local path, S3 skip, readFile error, YAML extension, inline fast-path).
+
+---
+
 ## [0.2.2] — 2026-05-05
 
 ### Added

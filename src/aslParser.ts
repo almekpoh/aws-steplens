@@ -149,6 +149,73 @@ export interface SubGraph {
 
 export class AslParser {
   /**
+   * If the document is a SAM/CloudFormation template that uses
+   * `AWS::Serverless::StateMachine` with a `DefinitionUri` pointing to a
+   * local file, return that relative path.  Returns null in all other cases
+   * (inline Definition, S3 DefinitionUri, CF StateMachine, non-template).
+   *
+   * The path is relative to the template file and suitable for use with
+   * `parseWithDefinitionUri`.
+   */
+  static extractDefinitionUri(text: string, languageId: string): string | null {
+    try {
+      const raw = languageId === 'json' ? JSON.parse(text) : yaml.parse(text);
+      if (!raw?.Resources || typeof raw.Resources !== 'object') return null;
+
+      for (const resource of Object.values(raw.Resources as Record<string, unknown>)) {
+        const r = resource as Record<string, unknown>;
+        if (r?.Type !== 'AWS::Serverless::StateMachine') continue;
+
+        const props = r?.Properties as Record<string, unknown> | undefined;
+        if (!props) continue;
+
+        const uri = props.DefinitionUri;
+        // Only local string paths — skip S3 objects ({ Bucket, Key }) and s3:// URIs
+        if (typeof uri === 'string' && !uri.startsWith('s3://')) {
+          return uri;
+        }
+      }
+      return null;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Async variant of `parse` that additionally handles SAM `DefinitionUri`.
+   *
+   * 1. Tries `parse()` (sync, all inline formats).
+   * 2. Falls back to `extractDefinitionUri()` + `readFile()` if step 1 fails.
+   *
+   * `readFile` receives the raw path returned by `extractDefinitionUri` (relative
+   * to the template) and must return the file contents as a string.  Inject
+   * `vscode.workspace.fs` in production and a simple `fs.readFile` stub in tests.
+   */
+  static async parseWithDefinitionUri(
+    text: string,
+    languageId: string,
+    readFile: (relativePath: string) => Promise<string>,
+  ): Promise<ParsedSfn | null> {
+    const direct = AslParser.parse(text, languageId);
+    if (direct) return direct;
+
+    const uriPath = AslParser.extractDefinitionUri(text, languageId);
+    if (!uriPath) return null;
+
+    try {
+      const content = await readFile(uriPath);
+      const ext = uriPath.toLowerCase().endsWith('.json') ? 'json' : 'yaml';
+      const result = AslParser.parse(content, ext);
+      // The definition lives in an external file referenced by the template,
+      // so it is wrapped — mark it accordingly regardless of the file format.
+      if (result) return { ...result, isWrapped: true };
+      return null;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
    * Parse a YAML or JSON file and extract the ASL definition.
    *
    * Supported formats:
@@ -524,4 +591,94 @@ export class AslParser {
     return result;
   }
 
+  // ── Rename helpers ─────────────────────────────────────────────────────────
+
+  /**
+   * Scan `lines` for every position where `stateName` appears as either:
+   *  • a state **declaration** key   →  `  StateName:`  (YAML) / `  "StateName": {`  (JSON)
+   *  • a state **reference** value   →  `Next: StateName` / `"Next": "StateName"` (JSON)
+   *
+   * Returns zero-based `{ line, start, end }` character ranges, suitable for
+   * building `vscode.Range` objects without importing VS Code types here.
+   */
+  static findStateNameOccurrences(
+    lines: string[],
+    stateName: string,
+  ): Array<{ line: number; start: number; end: number }> {
+    const result: Array<{ line: number; start: number; end: number }> = [];
+    const e = escapeRe(stateName);
+    const len = stateName.length;
+
+    // YAML declaration:  `  StateName:` or `  StateName: {` or `  StateName: # comment`
+    // The `:` must be followed by end-of-line, `{`, or `#` (never a plain string value).
+    const yamlDecl = new RegExp(`^(\\s+)(${e})\\s*:(?:\\s*(?:[#{].*)?)?$`);
+
+    // JSON declaration:  `  "StateName": {`
+    const jsonDecl = new RegExp(`^(\\s+")(${e})"\\s*:\\s*\\{`);
+
+    // YAML reference value:  `Next: StateName`  (possibly `- Next: …` in arrays)
+    // Allows trailing YAML comments.
+    const yamlVal = new RegExp(
+      `^(\\s*(?:-\\s+)?(?:Next|Default|StartAt)\\s*:\\s+)(${e})\\s*(?:#.*)?$`,
+    );
+
+    // JSON reference value:  `"Next": "StateName"` (optional trailing comma)
+    const jsonVal = new RegExp(
+      `^(\\s*"(?:Next|Default|StartAt)"\\s*:\\s+")(${e})"\\s*,?\\s*$`,
+    );
+
+    for (let i = 0; i < lines.length; i++) {
+      const text = lines[i];
+      let m: RegExpMatchArray | null;
+
+      // --- Declaration ---
+      if ((m = text.match(yamlDecl))) {
+        const s = m[1].length;
+        result.push({ line: i, start: s, end: s + len });
+      } else if ((m = text.match(jsonDecl))) {
+        const s = m[1].length;
+        result.push({ line: i, start: s, end: s + len });
+      }
+
+      // --- Reference value (independent check — different line structure) ---
+      if ((m = text.match(yamlVal))) {
+        const s = m[1].length;
+        result.push({ line: i, start: s, end: s + len });
+      } else if ((m = text.match(jsonVal))) {
+        const s = m[1].length;
+        result.push({ line: i, start: s, end: s + len });
+      }
+    }
+
+    return result;
+  }
+
+  /**
+   * If the cursor at `(lineIndex, col)` is on a state name (declaration or
+   * reference), return `{ name, start, end }`.  `stateNames` must come from
+   * `AslParser.allStateNames()`.  Returns `null` if the cursor is elsewhere.
+   */
+  static stateNameAtPosition(
+    lines: string[],
+    lineIndex: number,
+    col: number,
+    stateNames: string[],
+  ): { name: string; start: number; end: number } | null {
+    for (const name of stateNames) {
+      const hits = AslParser.findStateNameOccurrences([lines[lineIndex]], name);
+      if (hits.length > 0) {
+        const { start, end } = hits[0];
+        if (col >= start && col <= end) {
+          return { name, start, end };
+        }
+      }
+    }
+    return null;
+  }
+
+}
+
+/** Escape a string for use in a RegExp literal. */
+function escapeRe(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
