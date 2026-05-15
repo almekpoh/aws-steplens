@@ -7,6 +7,39 @@ const SUPPORTED_LANGUAGES = ['yaml', 'json'];
 
 let _debounceTimer: ReturnType<typeof setTimeout> | undefined;
 
+// ── Per-document async parse cache ────────────────────────────────────────────
+// Keyed by document URI string; invalidated whenever the document version changes.
+type DocCache = { version: number; parsed: import('./aslParser').ParsedSfn | null };
+const _docCache = new Map<string, DocCache>();
+
+/**
+ * Parse a document, resolving `DefinitionUri` when necessary.
+ *
+ * The result is cached by (uri, version) so repeated calls within the same
+ * edit cycle are free.  External file changes (the referenced ASL file) are
+ * not tracked; the user should save the template to re-trigger resolution.
+ */
+async function parseDocumentAsync(
+  doc: vscode.TextDocument,
+): Promise<import('./aslParser').ParsedSfn | null> {
+  const key = doc.uri.toString();
+  const cached = _docCache.get(key);
+  if (cached?.version === doc.version) return cached.parsed;
+
+  const parsed = await AslParser.parseWithDefinitionUri(
+    doc.getText(),
+    doc.languageId,
+    async (relativePath) => {
+      const resolved = vscode.Uri.joinPath(doc.uri, '..', relativePath);
+      const bytes = await vscode.workspace.fs.readFile(resolved);
+      return new TextDecoder().decode(bytes);
+    },
+  );
+
+  _docCache.set(key, { version: doc.version, parsed });
+  return parsed;
+}
+
 export function activate(context: vscode.ExtensionContext) {
   // ── Update notification ────────────────────────────────────────────────────
   const currentVersion = context.extension.packageJSON.version as string;
@@ -44,13 +77,13 @@ export function activate(context: vscode.ExtensionContext) {
       const editor = vscode.window.activeTextEditor;
       if (!editor) return;
 
-      const parsed = AslParser.parse(editor.document.getText(), editor.document.languageId);
-      if (!parsed) {
-        vscode.window.showWarningMessage('StepLens: no Step Functions definition detected.');
-        return;
-      }
-
-      PreviewPanel.create(context, editor.document);
+      void parseDocumentAsync(editor.document).then(parsed => {
+        if (!parsed) {
+          vscode.window.showWarningMessage('StepLens: no Step Functions definition detected.');
+          return;
+        }
+        PreviewPanel.create(context, editor.document);
+      });
     })
   );
 
@@ -58,7 +91,11 @@ export function activate(context: vscode.ExtensionContext) {
   context.subscriptions.push(
     vscode.commands.registerCommand('steplens.lint', () => {
       const editor = vscode.window.activeTextEditor;
-      if (editor) runLint(editor.document, diagnostics, statusBar);
+      if (editor) {
+        void parseDocumentAsync(editor.document).then(parsed =>
+          runLint(editor.document, diagnostics, statusBar, parsed)
+        );
+      }
     })
   );
 
@@ -85,6 +122,150 @@ export function activate(context: vscode.ExtensionContext) {
     })
   );
 
+  // ── Rename provider ────────────────────────────────────────────────────────
+  context.subscriptions.push(
+    vscode.languages.registerRenameProvider(SUPPORTED_LANGUAGES, {
+      prepareRename(doc, position) {
+        // Only operate on inline ASL files (not DefinitionUri templates).
+        const parsed = AslParser.parse(doc.getText(), doc.languageId);
+        if (!parsed) throw new Error('StepLens: no Step Functions definition in this file');
+
+        const lines = doc.getText().split('\n');
+        const stateNames = AslParser.allStateNames(parsed.definition);
+        const hit = AslParser.stateNameAtPosition(lines, position.line, position.character, stateNames);
+        if (!hit) throw new Error('StepLens: cursor is not on a state name');
+
+        return {
+          range: new vscode.Range(position.line, hit.start, position.line, hit.end),
+          placeholder: hit.name,
+        };
+      },
+
+      provideRenameEdits(doc, position, newName) {
+        const parsed = AslParser.parse(doc.getText(), doc.languageId);
+        if (!parsed) return;
+
+        const lines = doc.getText().split('\n');
+        const stateNames = AslParser.allStateNames(parsed.definition);
+        const hit = AslParser.stateNameAtPosition(lines, position.line, position.character, stateNames);
+        if (!hit) return;
+
+        const edit = new vscode.WorkspaceEdit();
+        for (const occ of AslParser.findStateNameOccurrences(lines, hit.name)) {
+          edit.replace(
+            doc.uri,
+            new vscode.Range(occ.line, occ.start, occ.line, occ.end),
+            newName,
+          );
+        }
+        return edit;
+      },
+    })
+  );
+
+  // ── Document highlight provider ───────────────────────────────────────────
+  // When the cursor rests on a state name, all occurrences are highlighted
+  // automatically (background tint). Drives the "change all occurrences" UX.
+  context.subscriptions.push(
+    vscode.languages.registerDocumentHighlightProvider(SUPPORTED_LANGUAGES, {
+      provideDocumentHighlights(doc, position) {
+        const parsed = AslParser.parse(doc.getText(), doc.languageId);
+        if (!parsed) return;
+
+        const lines = doc.getText().split('\n');
+        const hit = AslParser.stateNameAtPosition(
+          lines, position.line, position.character,
+          AslParser.allStateNames(parsed.definition),
+        );
+        if (!hit) return;
+
+        return AslParser.findStateNameOccurrences(lines, hit.name).map(occ =>
+          new vscode.DocumentHighlight(
+            new vscode.Range(occ.line, occ.start, occ.line, occ.end),
+            vscode.DocumentHighlightKind.Text,
+          )
+        );
+      },
+    })
+  );
+
+  // ── Code action: "Rename state…" (lightbulb) + Quick Fix on broken refs ───
+  context.subscriptions.push(
+    vscode.languages.registerCodeActionsProvider(
+      SUPPORTED_LANGUAGES,
+      {
+        provideCodeActions(doc, range, context) {
+          const parsed = AslParser.parse(doc.getText(), doc.languageId);
+          const actions: vscode.CodeAction[] = [];
+
+          // ── Quick Fix: fix broken state reference ─────────────────────────
+          // Fires when the linter emits "X not found" or "X does not exist".
+          if (parsed) {
+            const lines = doc.getText().split('\n');
+            const stateNames = AslParser.allStateNames(parsed.definition);
+
+            for (const diag of context.diagnostics) {
+              if (diag.source !== 'StepLens') continue;
+              const broken = extractBrokenStateName(diag.message);
+              if (!broken) continue;
+
+              const candidates = rankByDistance(broken, stateNames).slice(0, 3);
+              candidates.forEach((candidate, idx) => {
+                const fix = new vscode.CodeAction(
+                  `Rename "${broken}" → "${candidate}"`,
+                  vscode.CodeActionKind.QuickFix,
+                );
+                fix.diagnostics = [diag];
+                fix.isPreferred = idx === 0;
+                const edit = new vscode.WorkspaceEdit();
+                for (const occ of AslParser.findStateNameOccurrences(lines, broken)) {
+                  edit.replace(
+                    doc.uri,
+                    new vscode.Range(occ.line, occ.start, occ.line, occ.end),
+                    candidate,
+                  );
+                }
+                fix.edit = edit;
+                actions.push(fix);
+              });
+            }
+          }
+
+          return actions;
+        },
+      },
+      { providedCodeActionKinds: [vscode.CodeActionKind.QuickFix] },
+    )
+  );
+
+  // ── Completion: state names for Next / Default / StartAt ─────────────────
+  context.subscriptions.push(
+    vscode.languages.registerCompletionItemProvider(
+      SUPPORTED_LANGUAGES,
+      {
+        provideCompletionItems(doc, position) {
+          const parsed = AslParser.parse(doc.getText(), doc.languageId);
+          if (!parsed) return;
+
+          const prefix = doc.lineAt(position.line).text.slice(0, position.character);
+
+          // YAML:  `Next: ` or `Next: PartialName`
+          // JSON:  `"Next": "` or `"Next": "PartialName`
+          const isYaml = /^\s*(?:-\s+)?(?:Next|Default|StartAt)\s*:\s*\S*$/.test(prefix);
+          const isJson = /^\s*"(?:Next|Default|StartAt)"\s*:\s*"[^"]*$/.test(prefix);
+          if (!isYaml && !isJson) return;
+
+          return Object.keys(parsed.definition.States).map(name => {
+            const item = new vscode.CompletionItem(name, vscode.CompletionItemKind.Value);
+            item.detail = 'Step Functions state';
+            return item;
+          });
+        },
+      },
+      ' ', '"',
+    )
+  );
+
   // ── Auto-lint on keystroke (debounced) ──────────────────────────────────────
   context.subscriptions.push(
     vscode.workspace.onDidChangeTextDocument(e => {
@@ -96,14 +277,18 @@ export function activate(context: vscode.ExtensionContext) {
       clearTimeout(_debounceTimer);
       const doc = e.document;
       _debounceTimer = setTimeout(() => {
-        const cfg = vscode.workspace.getConfiguration('steplens');
-        if (cfg.get('lintOnType')) {
-          const stillActive = vscode.window.activeTextEditor?.document === doc;
-          runLint(doc, diagnostics, stillActive ? statusBar : undefined);
-        }
-        if (PreviewPanel.currentPanel) {
-          PreviewPanel.currentPanel.update(doc);
-        }
+        void (async () => {
+          const cfg = vscode.workspace.getConfiguration('steplens');
+          // Resolve once (handles DefinitionUri) and share with lint + preview.
+          const parsed = await parseDocumentAsync(doc);
+          if (cfg.get('lintOnType')) {
+            const stillActive = vscode.window.activeTextEditor?.document === doc;
+            runLint(doc, diagnostics, stillActive ? statusBar : undefined, parsed);
+          }
+          if (PreviewPanel.currentPanel) {
+            PreviewPanel.currentPanel.update(doc);
+          }
+        })();
       }, 200);
     })
   );
@@ -114,14 +299,19 @@ export function activate(context: vscode.ExtensionContext) {
       const cfg = vscode.workspace.getConfiguration('steplens');
       if (cfg.get('lintOnSave') && SUPPORTED_LANGUAGES.includes(doc.languageId)) {
         const isActive = vscode.window.activeTextEditor?.document === doc;
-        runLint(doc, diagnostics, isActive ? statusBar : undefined);
+        void parseDocumentAsync(doc).then(parsed =>
+          runLint(doc, diagnostics, isActive ? statusBar : undefined, parsed)
+        );
       }
     })
   );
 
-  // ── Clear diagnostics on close ─────────────────────────────────────────────
+  // ── Clear diagnostics and cache on close ──────────────────────────────────
   context.subscriptions.push(
-    vscode.workspace.onDidCloseTextDocument(doc => diagnostics.delete(doc.uri))
+    vscode.workspace.onDidCloseTextDocument(doc => {
+      diagnostics.delete(doc.uri);
+      _docCache.delete(doc.uri.toString());
+    })
   );
 
   // ── React to settings changes ──────────────────────────────────────────────
@@ -143,7 +333,9 @@ export function activate(context: vscode.ExtensionContext) {
       vscode.workspace.textDocuments.forEach(doc => {
         if (!SUPPORTED_LANGUAGES.includes(doc.languageId)) return;
         const isActive = vscode.window.activeTextEditor?.document === doc;
-        runLint(doc, diagnostics, isActive ? statusBar : undefined);
+        void parseDocumentAsync(doc).then(parsed =>
+          runLint(doc, diagnostics, isActive ? statusBar : undefined, parsed)
+        );
       });
     })
   );
@@ -162,7 +354,9 @@ export function activate(context: vscode.ExtensionContext) {
     vscode.window.onDidChangeActiveTextEditor(editor => {
       updateSfnContext(editor);
       if (editor && SUPPORTED_LANGUAGES.includes(editor.document.languageId)) {
-        runLint(editor.document, diagnostics, statusBar);
+        void parseDocumentAsync(editor.document).then(parsed =>
+          runLint(editor.document, diagnostics, statusBar, parsed)
+        );
       } else {
         statusBar.hide();
       }
@@ -176,7 +370,9 @@ export function activate(context: vscode.ExtensionContext) {
   vscode.workspace.textDocuments.forEach(doc => {
     if (SUPPORTED_LANGUAGES.includes(doc.languageId)) {
       const isActive = vscode.window.activeTextEditor?.document === doc;
-      runLint(doc, diagnostics, isActive ? statusBar : undefined);
+      void parseDocumentAsync(doc).then(parsed =>
+        runLint(doc, diagnostics, isActive ? statusBar : undefined, parsed)
+      );
     }
   });
 }
@@ -186,9 +382,14 @@ export function activate(context: vscode.ExtensionContext) {
  * only when the active file contains a Step Functions definition.
  */
 function updateSfnContext(editor: vscode.TextEditor | undefined) {
-  const isSfn = editor != null
-    && SUPPORTED_LANGUAGES.includes(editor.document.languageId)
-    && AslParser.parse(editor.document.getText(), editor.document.languageId) != null;
+  if (editor == null || !SUPPORTED_LANGUAGES.includes(editor.document.languageId)) {
+    vscode.commands.executeCommand('setContext', 'steplens.isSfnFile', false);
+    return;
+  }
+  const text = editor.document.getText();
+  const isSfn =
+    AslParser.parse(text, editor.document.languageId) != null ||
+    AslParser.extractDefinitionUri(text, editor.document.languageId) != null;
 
   vscode.commands.executeCommand('setContext', 'steplens.isSfnFile', isSfn);
 }
@@ -202,20 +403,25 @@ export function deactivate() {
 function runLint(
   doc: vscode.TextDocument,
   col: vscode.DiagnosticCollection,
-  statusBar?: vscode.StatusBarItem
+  statusBar?: vscode.StatusBarItem,
+  parsed?: import('./aslParser').ParsedSfn | null,
 ) {
   const cfg = vscode.workspace.getConfiguration('steplens');
   if (!cfg.get('autoDetect')) return;
 
-  const text = doc.getText();
-  const parsed = AslParser.parse(text, doc.languageId);
-  if (!parsed) {
+  // `parsed` may be pre-resolved (e.g. from parseDocumentAsync for DefinitionUri
+  // templates). When undefined the caller hasn't resolved yet; fall back to the
+  // fast sync path which handles all inline formats.
+  const result = parsed !== undefined ? parsed : AslParser.parse(doc.getText(), doc.languageId);
+  if (!result) {
     col.delete(doc.uri);
     statusBar?.hide();
     return;
   }
 
-  const errors = AslLinter.lint(parsed.definition);
+  const text = doc.getText();
+
+  const errors = AslLinter.lint(result.definition);
   const lines = text.split('\n');
 
   const diags = errors.map(err => {
@@ -327,4 +533,42 @@ function findLineForKey(lines: string[], stateName: string): number {
 
 function escRe(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/**
+ * Extract the broken state name from a StepLens diagnostic message.
+ * Matches the quoted name immediately before "not found" or "does not exist".
+ * e.g. `"StateA": Next "Foo" not found`  →  "Foo"
+ */
+function extractBrokenStateName(message: string): string | null {
+  const m = message.match(/"([^"]+)"\s+(?:not found|does not exist)/);
+  return m ? m[1] : null;
+}
+
+/**
+ * Rank `candidates` by Levenshtein distance to `target` (ascending).
+ * Case-insensitive comparison; equal distances preserve original order.
+ */
+function rankByDistance(target: string, candidates: string[]): string[] {
+  const t = target.toLowerCase();
+  return [...candidates]
+    .map(c => ({ name: c, dist: levenshtein(t, c.toLowerCase()) }))
+    .sort((a, b) => a.dist - b.dist)
+    .map(c => c.name);
+}
+
+function levenshtein(a: string, b: string): number {
+  const m = a.length, n = b.length;
+  const prev = Array.from({ length: n + 1 }, (_, j) => j);
+  const curr = new Array<number>(n + 1);
+  for (let i = 1; i <= m; i++) {
+    curr[0] = i;
+    for (let j = 1; j <= n; j++) {
+      curr[j] = a[i - 1] === b[j - 1]
+        ? prev[j - 1]
+        : 1 + Math.min(prev[j], curr[j - 1], prev[j - 1]);
+    }
+    prev.splice(0, n + 1, ...curr);
+  }
+  return prev[n];
 }

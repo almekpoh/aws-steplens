@@ -62,8 +62,16 @@
       position: fixed; top: 46px; right: 10px;
       background: rgba(20,20,20,0.92); border: 1px solid #333; border-radius: 6px;
       padding: 8px 12px; font-size: 11px; color: #aaa; line-height: 1.9;
-      pointer-events: none; min-width: 145px;
+      min-width: 145px; /* position:fixed already establishes a containing block for #legend-close */
     }
+    #legend.hidden { display: none; }
+    #legend-close {
+      position: absolute; top: 5px; right: 7px;
+      background: none; border: none; color: #555; cursor: pointer;
+      font-size: 13px; line-height: 1; padding: 0;
+    }
+    #legend-close:hover { color: #aaa; }
+    .export-btn.active { color: #ccc; border-color: #555; background: #222; }
     .leg { display: flex; align-items: center; gap: 7px; }
     .leg-sep { border-top: 1px solid #333; margin: 4px 0; }
     .dot { width: 10px; height: 10px; border-radius: 2px; flex-shrink: 0; }
@@ -78,6 +86,7 @@
     <button id="btn-back" class="back-btn" style="display:none">← Main</button>
     {{TAB_BUTTONS}}
     <div class="tab-sep"></div>
+    <button class="export-btn active" id="btn-legend">☰ Legend</button>
     <button class="export-btn" id="btn-fit">⊡ Fit</button>
     <button class="export-btn" id="btn-png">⬇ PNG</button>
     <button class="export-btn" id="btn-jpg">⬇ JPEG</button>
@@ -88,6 +97,7 @@
   </div>
 
   <div id="legend">
+    <button id="legend-close" title="Hide legend">×</button>
     <div style="font-size:10px;color:#666;margin-bottom:3px;text-transform:uppercase;letter-spacing:.5px">States</div>
     <div class="leg"><span class="dot" style="background:#1e4080;border:1.5px solid #4a9de8"></span>Task</div>
     <div class="leg"><span class="dot" style="background:#2e2d00;border:1.5px solid #ffe033;transform:rotate(45deg)"></span>Choice</div>
@@ -332,6 +342,16 @@
     document.querySelectorAll('.tab-btn').forEach(btn => {
       btn.addEventListener('click', () => switchTab(btn.dataset.id));
     });
+
+    // ── Legend toggle ─────────────────────────────────────────────────────
+    const legend    = document.getElementById('legend');
+    const btnLegend = document.getElementById('btn-legend');
+    function setLegend(visible) {
+      legend.classList.toggle('hidden', !visible);
+      btnLegend.classList.toggle('active', visible);
+    }
+    btnLegend.addEventListener('click', () => setLegend(legend.classList.contains('hidden')));
+    document.getElementById('legend-close').addEventListener('click', () => setLegend(false));
 
     document.getElementById('btn-back').addEventListener('click', () => switchTab('main'));
     document.getElementById('btn-fit').addEventListener('click', () => {
