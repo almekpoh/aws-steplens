@@ -49,6 +49,22 @@
     }
     .export-btn:hover { color: #ccc; border-color: #555; background: #222; }
 
+    /* ── Export dropdown ─────────────────────────────────────────────────── */
+    #export-wrap { position: relative; }
+    #export-menu {
+      display: none; position: fixed;
+      background: #1c1c1c; border: 1px solid #333; border-radius: 4px;
+      min-width: 140px; z-index: 100; overflow: hidden;
+    }
+    #export-menu.open { display: block; }
+    .export-item {
+      display: block; width: 100%; background: none; border: none;
+      color: #aaa; cursor: pointer; font-size: 11px; font-family: inherit;
+      padding: 7px 12px; text-align: left; white-space: nowrap; transition: background 0.1s;
+    }
+    .export-item:hover { background: #2a2a2a; color: #eee; }
+    .export-item-sub { font-size: 9px; color: #555; margin-left: 4px; }
+
     /* ── Graph area ──────────────────────────────────────────────────────── */
     #graph-area { flex: 1; position: relative; overflow: hidden; }
     /* visibility:hidden keeps real dimensions (unlike display:none = 0×0),
@@ -87,9 +103,16 @@
     {{TAB_BUTTONS}}
     <div class="tab-sep"></div>
     <button class="export-btn active" id="btn-legend">☰ Legend</button>
+    <button class="export-btn" id="btn-theme">☀</button>
     <button class="export-btn" id="btn-fit">⊡ Fit</button>
-    <button class="export-btn" id="btn-png">⬇ PNG</button>
-    <button class="export-btn" id="btn-jpg">⬇ JPEG</button>
+    <div id="export-wrap">
+      <button class="export-btn" id="btn-export">⬇ Export ▾</button>
+      <div id="export-menu">
+        <button class="export-item" id="btn-png">PNG <span class="export-item-sub">transparent bg</span></button>
+        <button class="export-item" id="btn-jpg">JPEG <span class="export-item-sub">current bg</span></button>
+        <button class="export-item" id="btn-html">HTML <span class="export-item-sub">interactive</span></button>
+      </div>
+    </div>
   </div>
 
   <div id="graph-area">
@@ -358,23 +381,55 @@
       instances[activeTabId]?.fit(undefined, 40);
     });
 
-    // ── Export ────────────────────────────────────────────────────────────
+    // ── Theme toggle (dark / light) ───────────────────────────────────────
+    let lightTheme = false;
+    function applyTheme(light) {
+      lightTheme = light;
+      document.body.style.background = light ? '#f5f5f5' : '#141414';
+      document.getElementById('btn-theme').textContent = light ? '☾' : '☀';
+      const labelBg = light ? '#f5f5f5' : '#141414';
+      Object.values(instances).forEach(cy => {
+        cy.style().selector('edge').style('text-background-color', labelBg).update();
+      });
+    }
+    document.getElementById('btn-theme').addEventListener('click', () => applyTheme(!lightTheme));
+
+    // ── Export dropdown ───────────────────────────────────────────────────
+    const exportMenu = document.getElementById('export-menu');
+    document.getElementById('btn-export').addEventListener('click', e => {
+      e.stopPropagation();
+      const rect = e.currentTarget.getBoundingClientRect();
+      exportMenu.style.top  = (rect.bottom + 4) + 'px';
+      exportMenu.style.right = (window.innerWidth - rect.right) + 'px';
+      exportMenu.classList.toggle('open');
+    });
+    document.addEventListener('click', () => exportMenu.classList.remove('open'));
+
     document.getElementById('btn-png').addEventListener('click', () => {
+      exportMenu.classList.remove('open');
       const cy = instances[activeTabId];
       if (!cy) return;
+      cy.fit(undefined, 40);
       vscode.postMessage({
         type: 'export', format: 'png',
-        data: cy.png({ output: 'base64uri', bg: '#141414', scale: 2 }),
+        data: cy.png({ output: 'base64uri', scale: 2 }),
       });
     });
 
     document.getElementById('btn-jpg').addEventListener('click', () => {
+      exportMenu.classList.remove('open');
       const cy = instances[activeTabId];
       if (!cy) return;
+      cy.fit(undefined, 40);
       vscode.postMessage({
         type: 'export', format: 'jpeg',
-        data: cy.jpg({ output: 'base64uri', bg: '#141414', scale: 2, quality: 0.92 }),
+        data: cy.jpg({ output: 'base64uri', bg: lightTheme ? '#f5f5f5' : '#141414', scale: 2, quality: 0.92 }),
       });
+    });
+
+    document.getElementById('btn-html').addEventListener('click', () => {
+      exportMenu.classList.remove('open');
+      vscode.postMessage({ type: 'exportHtml' });
     });
 
     // ── Incoming messages (highlight + live update) ───────────────────────
