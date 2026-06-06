@@ -25,7 +25,10 @@ export class PreviewPanel {
       {
         enableScripts: true,
         retainContextWhenHidden: true,
-        localResourceRoots: [vscode.Uri.file(path.join(context.extensionPath, 'webview'))],
+        localResourceRoots: [
+          vscode.Uri.file(path.join(context.extensionPath, 'webview')),
+          vscode.Uri.file(path.join(context.extensionPath, 'media')),
+        ],
       }
     );
     PreviewPanel.currentPanel = new PreviewPanel(panel, context, doc);
@@ -171,6 +174,21 @@ export class PreviewPanel {
       .replace(/</g, '\\u003c')
       .replace(/>/g, '\\u003e');
 
+    // Build icon URI map: service key → webview URI for the corresponding SVG
+    const iconDir = path.join(this._context.extensionPath, 'media', 'aws-icons');
+    const iconUriMap: Record<string, string> = {};
+    try {
+      const files = fs.readdirSync(iconDir);
+      for (const file of files) {
+        if (file.endsWith('.svg')) {
+          const service = file.slice(0, -4); // strip .svg
+          iconUriMap[service] = this._panel.webview.asWebviewUri(
+            vscode.Uri.file(path.join(iconDir, file))
+          ).toString();
+        }
+      }
+    } catch { /* icons directory not yet populated — graceful degradation */ }
+
     return template
       .replace('{{CSP_SOURCE}}', `${this._panel.webview.cspSource} 'nonce-${nonce}'`)
       .replace('{{NONCE}}', nonce)
@@ -179,6 +197,7 @@ export class PreviewPanel {
       .replace('{{PANES}}', panesHtml)
       .replace('{{TABS_JSON}}', safeJson(tabs))
       .replace('{{NODE_TO_TAB_JSON}}', safeJson(nodeToTab))
+      .replace('{{ICON_URI_MAP_JSON}}', safeJson(iconUriMap))
       .replace('{{HINT_SUBGRAPHS}}', subGraphs.length > 0 ? ' · Double-click Parallel/Map to explore sub-graph' : '');
   }
 

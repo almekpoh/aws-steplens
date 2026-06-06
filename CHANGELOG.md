@@ -2,6 +2,31 @@
 
 ---
 
+## [0.4.0] — 2026-06-06
+
+### Added
+
+**Graph preview — Official AWS service icons on Task nodes**
+
+Task nodes that target an AWS service now render as visual cards — identical in spirit to the AWS Step Functions console, with several improvements:
+
+- **36 official AWS Architecture Icons** embedded in the extension (Lambda, DynamoDB, SNS, SQS, S3, Bedrock, EventBridge, SageMaker, ECS, Batch, Glue, Athena, Kinesis, Firehose, EMR, CodeBuild, Textract, Rekognition, Comprehend, Polly, Transcribe, Translate, Lex, AppSync, API Gateway, CloudFormation, Systems Manager, Secrets Manager, MediaConvert, IoT, Step Functions, and more).
+- **Card layout**: coloured left accent bar (service colour), 44×44 icon square, subtitle line (`Amazon DynamoDB: PutItem`), and state name in bold.
+- **Service detection**: handles all ARN patterns — `states:::SERVICE:ACTION`, `states:::aws-sdk:SERVICE:ACTION`, direct Lambda ARNs, and nested Step Functions ARNs.
+- **Graceful fallback**: unrecognised services display coloured initials instead of an icon.
+
+**Graph preview — Theme toggle**
+
+A `☀/☾` button in the toolbar switches between dark (`#141414`) and light (`#f5f5f5`) backgrounds. Card SVGs regenerate automatically on theme change. Edge label backgrounds update to match.
+
+**Graph preview — Export improvements**
+
+- PNG export uses a **transparent background** (previously dark).
+- JPEG export uses the **current active theme background** (dark or light).
+- Both exports **refit** the graph before capturing.
+
+---
+
 ## [0.3.0] — 2026-05-14
 
 ### Added

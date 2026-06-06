@@ -124,6 +124,10 @@ export interface GraphNode {
   isWaitForToken?: boolean;
   isDistributedMap?: boolean;
   isHttpTask?: boolean;
+  // NEW:
+  service?: string;        // 'lambda' | 'sns' | 'dynamodb' | 'bedrock' | etc.
+  serviceAction?: string;  // 'Invoke' | 'Publish' | 'PutItem' | etc.
+  resourceLabel?: string;  // 'AWS Lambda: Invoke' — shown as subtitle in card
 }
 
 export interface GraphEdge {
@@ -145,6 +149,97 @@ export interface SubGraph {
   type: string;        // 'Parallel' | 'Map'
   parentStateName: string;
   data: GraphData;
+}
+
+/** Official display names for Step Functions SDK integration services */
+const SERVICE_DISPLAY_NAMES: Record<string, string> = {
+  'lambda':           'AWS Lambda',
+  'states':           'AWS Step Functions',
+  'ecs':              'Amazon ECS',
+  'fargate':          'AWS Fargate',
+  'batch':            'AWS Batch',
+  'dynamodb':         'Amazon DynamoDB',
+  's3':               'Amazon S3',
+  'athena':           'Amazon Athena',
+  'glue':             'AWS Glue',
+  'databrew':         'AWS Glue DataBrew',
+  'kinesis':          'Amazon Kinesis',
+  'firehose':         'Amazon Kinesis Firehose',
+  'elasticmapreduce': 'Amazon EMR',
+  'emr-containers':   'Amazon EMR on EKS',
+  'emr-serverless':   'Amazon EMR Serverless',
+  'appsync':          'AWS AppSync',
+  'apigateway':       'Amazon API Gateway',
+  'events':           'Amazon EventBridge',
+  'eventbridge':      'Amazon EventBridge',
+  'scheduler':        'Amazon EventBridge Scheduler',
+  'sns':              'Amazon SNS',
+  'sqs':              'Amazon SQS',
+  'sagemaker':        'Amazon SageMaker',
+  'comprehend':       'Amazon Comprehend',
+  'rekognition':      'Amazon Rekognition',
+  'textract':         'Amazon Textract',
+  'translate':        'Amazon Translate',
+  'polly':            'Amazon Polly',
+  'transcribe':       'Amazon Transcribe',
+  'lex':              'Amazon Lex',
+  'cloudformation':   'AWS CloudFormation',
+  'ssm':              'AWS Systems Manager',
+  'secretsmanager':   'AWS Secrets Manager',
+  'mediaconvert':     'AWS Elemental MediaConvert',
+  'iot':              'AWS IoT',
+  'codebuild':        'AWS CodeBuild',
+  'bedrock':          'Amazon Bedrock',
+  'bedrock-agent':    'Amazon Bedrock Agent',
+  'http':             'HTTP',
+};
+
+/** Convert camelCase or lowercase to PascalCase — e.g. invokeModel → InvokeModel */
+function toPascalCase(s: string): string {
+  if (!s) return s;
+  return s.charAt(0).toUpperCase() + s.slice(1);
+}
+
+/**
+ * Extract service identifier, action and display label from a Step Functions Resource ARN.
+ * Returns empty object for non-Task states or unrecognised ARN formats.
+ */
+function detectService(resource: string | undefined): {
+  service?: string;
+  serviceAction?: string;
+  resourceLabel?: string;
+} {
+  if (!resource) return {};
+
+  // Pattern: arn:*:states:::aws-sdk:SERVICE:ACTION[.PATTERN]
+  const awsSdkMatch = resource.match(/arn:[^:]*:states:::aws-sdk:([^:.]+):([^.]+)/);
+  if (awsSdkMatch) {
+    const service = awsSdkMatch[1].toLowerCase();
+    const action  = toPascalCase(awsSdkMatch[2]);
+    const display = SERVICE_DISPLAY_NAMES[service] ?? service;
+    return { service, serviceAction: action, resourceLabel: `${display}: ${action}` };
+  }
+
+  // Pattern: arn:*:states:::SERVICE:ACTION[.PATTERN]
+  const sdkMatch = resource.match(/arn:[^:]*:states:::([^:.]+):([^.]+)/);
+  if (sdkMatch) {
+    const service = sdkMatch[1].toLowerCase();
+    const action  = toPascalCase(sdkMatch[2]);
+    const display = SERVICE_DISPLAY_NAMES[service] ?? service;
+    return { service, serviceAction: action, resourceLabel: `${display}: ${action}` };
+  }
+
+  // Pattern: direct Lambda ARN — arn:aws:lambda:REGION:ACCOUNT:function:NAME
+  if (/arn:[^:]*:lambda:/.test(resource)) {
+    return { service: 'lambda', serviceAction: 'Invoke', resourceLabel: 'AWS Lambda: Invoke' };
+  }
+
+  // Pattern: nested Step Functions — arn:aws:states:REGION:ACCOUNT:stateMachine:NAME
+  if (/arn:[^:]*:states:[^:]+:[^:]+:stateMachine:/.test(resource)) {
+    return { service: 'states', serviceAction: 'StartExecution', resourceLabel: 'AWS Step Functions: StartExecution' };
+  }
+
+  return {};
 }
 
 export class AslParser {
@@ -406,6 +501,10 @@ export class AslParser {
         if (detail) label += `\n${detail}`;
       }
 
+      const serviceInfo = state.Type === 'Task' || state.Type === undefined
+        ? detectService(resourceStr)
+        : {};
+
       nodes.push({
         id: name,
         label,
@@ -414,6 +513,7 @@ export class AslParser {
         isWaitForToken,
         isDistributedMap,
         isHttpTask,
+        ...serviceInfo,
       });
     }
 

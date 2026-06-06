@@ -3,9 +3,10 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src {{CSP_SOURCE}}; style-src 'unsafe-inline'; img-src data:;">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src {{CSP_SOURCE}}; style-src 'unsafe-inline'; img-src data: {{CSP_SOURCE}}; connect-src {{CSP_SOURCE}};">
   <title>StepLens Preview</title>
   <script src="{{VENDOR_URI}}"></script>
+  <script nonce="{{NONCE}}">window.ICON_URI_MAP = {{ICON_URI_MAP_JSON}};</script>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body {
@@ -88,6 +89,7 @@
     <div class="tab-sep"></div>
     <button class="export-btn active" id="btn-legend">☰ Legend</button>
     <button class="export-btn" id="btn-fit">⊡ Fit</button>
+    <button class="export-btn" id="btn-theme" title="Toggle light/dark background">☀</button>
     <button class="export-btn" id="btn-png">⬇ PNG</button>
     <button class="export-btn" id="btn-jpg">⬇ JPEG</button>
   </div>
@@ -158,6 +160,152 @@
       GHOST:    { bg: '#2a0000', border: '#f44336', shape: 'rectangle'       },
     };
 
+    // ── Service icon colour accents (left bar + icon bg) ──────────────────────
+    const SERVICE_ACCENT = {
+      'lambda':           '#FF9900',
+      'states':           '#E7157B',
+      'ecs':              '#FF4B00',
+      'fargate':          '#FF4B00',
+      'batch':            '#FF9900',
+      'dynamodb':         '#3334B9',
+      's3':               '#3F8624',
+      'athena':           '#8C4FFF',
+      'glue':             '#8C4FFF',
+      'databrew':         '#8C4FFF',
+      'kinesis':          '#8C4FFF',
+      'firehose':         '#8C4FFF',
+      'elasticmapreduce': '#FF9900',
+      'emr-containers':   '#FF9900',
+      'emr-serverless':   '#FF9900',
+      'appsync':          '#E7157B',
+      'apigateway':       '#A166FF',
+      'events':           '#E7157B',
+      'eventbridge':      '#E7157B',
+      'scheduler':        '#E7157B',
+      'sns':              '#E7157B',
+      'sqs':              '#C7131F',
+      'sagemaker':        '#01A88D',
+      'comprehend':       '#3334B9',
+      'rekognition':      '#3334B9',
+      'textract':         '#3334B9',
+      'translate':        '#3334B9',
+      'polly':            '#3334B9',
+      'transcribe':       '#3334B9',
+      'lex':              '#3334B9',
+      'cloudformation':   '#C7131F',
+      'ssm':              '#C7131F',
+      'secretsmanager':   '#C7131F',
+      'mediaconvert':     '#3334B9',
+      'iot':              '#3F8624',
+      'codebuild':        '#3334B9',
+      'bedrock':          '#01A88D',
+      'bedrock-agent':    '#01A88D',
+      'http':             '#5A5A5A',
+    };
+
+    // Loaded icon SVG content (base64 data URIs) — populated async on startup
+    const ICON_DATA = {};
+
+    // SVG card cache — key: `${service}|${label}|${theme}` → data URI
+    const CARD_CACHE = {};
+
+    /** Preload all icon SVGs from the URI map, store as base64 data URIs */
+    async function preloadIcons() {
+      const uriMap = window.ICON_URI_MAP || {};
+      await Promise.all(Object.entries(uriMap).map(async ([service, uri]) => {
+        try {
+          const resp = await fetch(uri);
+          const text = await resp.text();
+          ICON_DATA[service] = 'data:image/svg+xml;base64,' + btoa(unescape(encodeURIComponent(text)));
+        } catch { /* silently ignore — node will fall back to plain style */ }
+      }));
+    }
+
+    /** Measure approximate text width in px at font-size 13 Consolas (rough heuristic) */
+    function approxWidth(text) {
+      return Math.ceil(text.length * 7.5);
+    }
+
+    /** Escape text for safe embedding inside SVG attribute values and content */
+    function svgEsc(s) {
+      return String(s)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+    }
+
+    /**
+     * Build a card SVG for a Task node with a recognised AWS service.
+     * Returns a data:image/svg+xml URI (URL-encoded, NOT base64).
+     *
+     * Layout (dark theme):
+     *   - Rounded rectangle card (bg tinted with service colour at low opacity)
+     *   - 4px coloured left accent bar
+     *   - 44×44 coloured icon square with official SVG icon
+     *   - Subtitle line: "Amazon Lambda: Invoke" (muted, 9px)
+     *   - State name: "MyFunctionCall" (bright, 13px bold)
+     *   - Border: service colour at 35% opacity
+     */
+    function buildServiceCard(service, resourceLabel, stateName, isLight) {
+      const accent    = SERVICE_ACCENT[service] || '#5A5A5A';
+      const iconUri   = ICON_DATA[service];
+      const cardBg    = isLight ? '#f0f0f0' : '#161f2e';
+      const textMain  = isLight ? '#1a1a1a' : '#e8e8e8';
+      const textSub   = isLight ? '#666666' : '#7a8a9a';
+      const borderClr = accent;
+
+      // Truncate subtitle and label to fit
+      const subtitle = (resourceLabel || service).length > 30
+        ? (resourceLabel || service).slice(0, 28) + '\u2026'
+        : (resourceLabel || service);
+      const mainLabel = stateName.length > 24
+        ? stateName.slice(0, 22) + '\u2026'
+        : stateName;
+
+      const minW  = 200;
+      const cardW = Math.max(minW, 68 + approxWidth(mainLabel) + 16);
+      const cardH = 68;
+
+      // Icon area
+      const iconBgX = 10, iconBgY = 12, iconSz = 44;
+      // Text area
+      const textX = 64;
+
+      // Build icon element — inline <image> if SVG loaded, coloured initials otherwise
+      let iconContent = '';
+      if (iconUri) {
+        iconContent = `<image href="${iconUri}" x="${iconBgX + 8}" y="${iconBgY + 8}" width="${iconSz - 16}" height="${iconSz - 16}"/>`;
+      } else {
+        const initials = svgEsc(service.slice(0, 2).toUpperCase());
+        iconContent = `<text x="${iconBgX + iconSz / 2}" y="${iconBgY + iconSz / 2 + 5}" fill="white" font-size="13" font-family="monospace" font-weight="bold" text-anchor="middle">${initials}</text>`;
+      }
+
+      const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${cardW}" height="${cardH}">
+  <defs>
+    <clipPath id="card-clip"><rect width="${cardW}" height="${cardH}" rx="8"/></clipPath>
+  </defs>
+  <!-- Card background -->
+  <rect width="${cardW}" height="${cardH}" rx="8" fill="${cardBg}"/>
+  <!-- Subtle service tint overlay -->
+  <rect width="${cardW}" height="${cardH}" rx="8" fill="${accent}" fill-opacity="0.07"/>
+  <!-- Border -->
+  <rect x="0.5" y="0.5" width="${cardW - 1}" height="${cardH - 1}" rx="7.5" fill="none" stroke="${borderClr}" stroke-width="1.5" stroke-opacity="0.4"/>
+  <!-- Left accent bar -->
+  <rect x="0" y="0" width="4" height="${cardH}" rx="2" fill="${accent}"/>
+  <!-- Icon background square -->
+  <rect x="${iconBgX}" y="${iconBgY}" width="${iconSz}" height="${iconSz}" rx="7" fill="${accent}"/>
+  <!-- Icon -->
+  ${iconContent}
+  <!-- Subtitle -->
+  <text x="${textX}" y="28" fill="${textSub}" font-size="9" font-family="Consolas,monospace">${svgEsc(subtitle)}</text>
+  <!-- Main label -->
+  <text x="${textX}" y="46" fill="${textMain}" font-size="13" font-family="Consolas,monospace" font-weight="bold">${svgEsc(mainLabel)}</text>
+</svg>`;
+
+      return 'data:image/svg+xml,' + encodeURIComponent(svg);
+    }
+
     const CY_STYLE = [
       {
         selector: 'node',
@@ -209,8 +357,26 @@
         style: { 'overlay-opacity': 0 }
       },
       {
+        selector: 'node[?svgCard]',
+        style: {
+          'background-image':    'data(svgCard)',
+          'background-fit':      'cover',
+          'background-clip':     'node',
+          'background-opacity':  0,
+          'border-width':        0,
+          'label':               '',
+          'width':               'data(cardW)',
+          'height':              'data(cardH)',
+          'shape':               'round-rectangle',
+          'padding':             0,
+        }
+      },
+      {
         selector: 'node.highlighted',
-        style: { 'border-color': '#f5a623', 'border-width': 3.5, 'background-color': '#2a1800' }
+        style: {
+          'border-color': '#f5a623', 'border-width': 3.5, 'background-color': '#2a1800',
+          'overlay-color': '#f5a623', 'overlay-opacity': 0.15, 'overlay-padding': 6,
+        }
       },
       {
         selector: 'edge',
@@ -264,16 +430,72 @@
       animate: false,
     };
 
-    function buildElements(graphData) {
+    function buildElements(graphData, isLight) {
       const nodes = graphData.nodes.map(n => {
         const s = NS[n.type] || NS.Task;
-        return { data: { id: n.id, label: n.label, type: n.type, bg: s.bg, border: s.border, shape: s.shape, hasRetry: n.hasRetry ? 'true' : 'false' } };
+        const cacheKey = n.service ? `${n.service}|${n.id}|${isLight ? 'l' : 'd'}` : null;
+
+        if (n.type === 'Task' && n.service) {
+          // Check cache first
+          if (!CARD_CACHE[cacheKey]) {
+            CARD_CACHE[cacheKey] = buildServiceCard(n.service, n.resourceLabel, n.id, isLight);
+          }
+          const cardUri = CARD_CACHE[cacheKey];
+          const accent = SERVICE_ACCENT[n.service] || s.border;
+          return {
+            data: {
+              id: n.id,
+              label: '',           // text drawn inside SVG card
+              type: n.type,
+              bg: s.bg,
+              border: accent,
+              shape: 'round-rectangle',
+              hasRetry: n.hasRetry ? 'true' : 'false',
+              svgCard: cardUri,
+              cardW: Math.max(200, 68 + Math.ceil(n.id.length * 7.5) + 16),
+              cardH: 68,
+              service: n.service || '',
+              resourceLabel: n.resourceLabel || '',
+            }
+          };
+        }
+
+        return {
+          data: {
+            id: n.id,
+            label: n.label,
+            type: n.type,
+            bg: s.bg,
+            border: s.border,
+            shape: s.shape,
+            hasRetry: n.hasRetry ? 'true' : 'false',
+            service: '',
+            resourceLabel: '',
+          }
+        };
       });
       const edges = graphData.edges.map(e => ({
         data: { id: e.id, source: e.source, target: e.target, label: e.label, edgeType: e.edgeType }
       }));
       return [...nodes, ...edges];
     }
+
+    // ── Theme detection ───────────────────────────────────────────────────
+    // VS Code injects a `vscode-theme-kind` attribute on <body>; fall back to
+    // checking body background luminance. Default to dark.
+    function detectLight() {
+      const kind = document.body.getAttribute('data-vscode-theme-kind') || '';
+      if (kind === 'vscode-light' || kind === 'vscode-high-contrast-light') return true;
+      // Heuristic: if body background is very bright, treat as light
+      const bg = getComputedStyle(document.body).backgroundColor;
+      const m = bg.match(/\d+/g);
+      if (m && m.length >= 3) {
+        const lum = (+m[0] * 299 + +m[1] * 587 + +m[2] * 114) / 1000;
+        if (lum > 180) return true;
+      }
+      return false;
+    }
+    let lightTheme = detectLight();
 
     // ── Initialise ALL Cytoscape instances upfront ────────────────────────
     // Using visibility:hidden keeps real container dimensions, so every
@@ -287,7 +509,7 @@
 
       const cy = cytoscape({
         container,
-        elements: buildElements(tab.data),
+        elements: buildElements(tab.data, lightTheme),
         style: CY_STYLE,
         layout: LAYOUT,
         wheelSensitivity: 0.5,
@@ -313,6 +535,26 @@
       });
 
       instances[tab.id] = cy;
+    });
+
+    // ── Preload icons then rebuild SVG cards with real images ─────────────
+    preloadIcons().then(() => {
+      // Icons loaded — rebuild all node SVG cards with real icon images
+      Object.keys(CARD_CACHE).forEach(k => delete CARD_CACHE[k]);
+      Object.values(instances).forEach((cy, i) => {
+        cy.batch(() => {
+          cy.nodes('[?svgCard]').forEach(node => {
+            const service = node.data('service');
+            const resLabel = node.data('resourceLabel');
+            if (service) {
+              const cacheKey = `${service}|${node.id()}|${lightTheme ? 'l' : 'd'}`;
+              CARD_CACHE[cacheKey] = buildServiceCard(service, resLabel, node.id(), lightTheme);
+              node.data('svgCard', CARD_CACHE[cacheKey]);
+            }
+          });
+        });
+        if (i === 0) cy.fit(undefined, 40);
+      });
     });
 
     // ── Initial fit after browser layout pass ─────────────────────────────
@@ -343,6 +585,32 @@
       btn.addEventListener('click', () => switchTab(btn.dataset.id));
     });
 
+    // ── Theme application ─────────────────────────────────────────────────
+    function applyTheme(light) {
+      lightTheme = light;
+      // Update body background for dark/light
+      document.body.style.background = light ? '#f5f5f5' : '#141414';
+      // Flush card SVG cache and rebuild for all instances
+      Object.keys(CARD_CACHE).forEach(k => delete CARD_CACHE[k]);
+      Object.values(instances).forEach(cy => {
+        cy.batch(() => {
+          cy.nodes('[?svgCard]').forEach(node => {
+            const service = node.data('service');
+            const resLabel = node.data('resourceLabel');
+            const stateName = node.id();
+            if (service) {
+              const cacheKey = `${service}|${stateName}|${light ? 'l' : 'd'}`;
+              if (!CARD_CACHE[cacheKey]) {
+                CARD_CACHE[cacheKey] = buildServiceCard(service, resLabel, stateName, light);
+              }
+              node.data('svgCard', CARD_CACHE[cacheKey]);
+              node.data('border', SERVICE_ACCENT[service] || '#4a9de8');
+            }
+          });
+        });
+      });
+    }
+
     // ── Legend toggle ─────────────────────────────────────────────────────
     const legend    = document.getElementById('legend');
     const btnLegend = document.getElementById('btn-legend');
@@ -358,22 +626,37 @@
       instances[activeTabId]?.fit(undefined, 40);
     });
 
+    // ── Theme toggle ──────────────────────────────────────────────────────
+    const btnTheme = document.getElementById('btn-theme');
+    btnTheme.addEventListener('click', () => {
+      applyTheme(!lightTheme);
+      btnTheme.textContent = lightTheme ? '☾' : '☀';
+      // Also update edge label text background (non-card nodes)
+      Object.values(instances).forEach(cy => {
+        const labelBg = lightTheme ? '#f5f5f5' : '#141414';
+        cy.style().selector('edge').style('text-background-color', labelBg).update();
+      });
+    });
+
     // ── Export ────────────────────────────────────────────────────────────
     document.getElementById('btn-png').addEventListener('click', () => {
       const cy = instances[activeTabId];
       if (!cy) return;
+      cy.fit(undefined, 40);
       vscode.postMessage({
         type: 'export', format: 'png',
-        data: cy.png({ output: 'base64uri', bg: '#141414', scale: 2 }),
+        data: cy.png({ output: 'base64uri', bg: 'transparent', scale: 2 }),
       });
     });
 
     document.getElementById('btn-jpg').addEventListener('click', () => {
       const cy = instances[activeTabId];
       if (!cy) return;
+      cy.fit(undefined, 40);
+      const bgColor = lightTheme ? '#f5f5f5' : '#141414';
       vscode.postMessage({
         type: 'export', format: 'jpeg',
-        data: cy.jpg({ output: 'base64uri', bg: '#141414', scale: 2, quality: 0.92 }),
+        data: cy.jpg({ output: 'base64uri', bg: bgColor, scale: 2, quality: 0.92 }),
       });
     });
 
@@ -394,7 +677,7 @@
           const cy = instances[tab.id];
           if (!cy) return;
           cy.elements().remove();
-          cy.add(buildElements(tab.data));
+          cy.add(buildElements(tab.data, lightTheme));
           cy.layout(LAYOUT).run();
           if (tab.id === activeTabId) cy.fit(undefined, 40);
         });
