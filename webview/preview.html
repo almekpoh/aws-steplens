@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src {{CSP_SOURCE}}; style-src 'unsafe-inline'; img-src data: {{CSP_SOURCE}}; connect-src {{CSP_SOURCE}};">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src {{CSP_SOURCE}}; style-src 'unsafe-inline'; img-src data:;">
   <title>StepLens Preview</title>
   <script src="{{VENDOR_URI}}"></script>
   <script nonce="{{NONCE}}">window.ICON_URI_MAP = {{ICON_URI_MAP_JSON}};</script>
@@ -203,23 +203,8 @@
       'http':             '#5A5A5A',
     };
 
-    // Loaded icon SVG content (base64 data URIs) — populated async on startup
-    const ICON_DATA = {};
-
     // SVG card cache — key: `${service}|${label}|${theme}` → data URI
     const CARD_CACHE = {};
-
-    /** Preload all icon SVGs from the URI map, store as base64 data URIs */
-    async function preloadIcons() {
-      const uriMap = window.ICON_URI_MAP || {};
-      await Promise.all(Object.entries(uriMap).map(async ([service, uri]) => {
-        try {
-          const resp = await fetch(uri);
-          const text = await resp.text();
-          ICON_DATA[service] = 'data:image/svg+xml;base64,' + btoa(unescape(encodeURIComponent(text)));
-        } catch { /* silently ignore — node will fall back to plain style */ }
-      }));
-    }
 
     /** Measure approximate text width in px at font-size 13 Consolas (rough heuristic) */
     function approxWidth(text) {
@@ -249,7 +234,7 @@
      */
     function buildServiceCard(service, resourceLabel, stateName, isLight) {
       const accent    = SERVICE_ACCENT[service] || '#5A5A5A';
-      const iconUri   = ICON_DATA[service];
+      const iconUri   = (window.ICON_URI_MAP || {})[service];
       const cardBg    = isLight ? '#f0f0f0' : '#161f2e';
       const textMain  = isLight ? '#1a1a1a' : '#e8e8e8';
       const textSub   = isLight ? '#666666' : '#7a8a9a';
@@ -362,7 +347,8 @@
           'background-image':    'data(svgCard)',
           'background-fit':      'cover',
           'background-clip':     'node',
-          'background-opacity':  0,
+          'background-opacity':  1,
+          'background-color':    'transparent',
           'border-width':        0,
           'label':               '',
           'width':               'data(cardW)',
@@ -535,26 +521,6 @@
       });
 
       instances[tab.id] = cy;
-    });
-
-    // ── Preload icons then rebuild SVG cards with real images ─────────────
-    preloadIcons().then(() => {
-      // Icons loaded — rebuild all node SVG cards with real icon images
-      Object.keys(CARD_CACHE).forEach(k => delete CARD_CACHE[k]);
-      Object.values(instances).forEach((cy, i) => {
-        cy.batch(() => {
-          cy.nodes('[?svgCard]').forEach(node => {
-            const service = node.data('service');
-            const resLabel = node.data('resourceLabel');
-            if (service) {
-              const cacheKey = `${service}|${node.id()}|${lightTheme ? 'l' : 'd'}`;
-              CARD_CACHE[cacheKey] = buildServiceCard(service, resLabel, node.id(), lightTheme);
-              node.data('svgCard', CARD_CACHE[cacheKey]);
-            }
-          });
-        });
-        if (i === 0) cy.fit(undefined, 40);
-      });
     });
 
     // ── Initial fit after browser layout pass ─────────────────────────────

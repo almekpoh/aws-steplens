@@ -174,7 +174,8 @@ export class PreviewPanel {
       .replace(/</g, '\\u003c')
       .replace(/>/g, '\\u003e');
 
-    // Build icon URI map: service key → webview URI for the corresponding SVG
+    // Build icon map: service key → base64-encoded SVG data URI (embedded server-side,
+    // so the webview never needs to fetch anything — no async delay, no CSP connect-src needed)
     const iconDir = path.join(this._context.extensionPath, 'media', 'aws-icons');
     const iconUriMap: Record<string, string> = {};
     try {
@@ -182,9 +183,8 @@ export class PreviewPanel {
       for (const file of files) {
         if (file.endsWith('.svg')) {
           const service = file.slice(0, -4); // strip .svg
-          iconUriMap[service] = this._panel.webview.asWebviewUri(
-            vscode.Uri.file(path.join(iconDir, file))
-          ).toString();
+          const svgContent = fs.readFileSync(path.join(iconDir, file));
+          iconUriMap[service] = `data:image/svg+xml;base64,${svgContent.toString('base64')}`;
         }
       }
     } catch { /* icons directory not yet populated — graceful degradation */ }
