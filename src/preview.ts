@@ -175,30 +175,44 @@ export class PreviewPanel {
       .replace(/>/g, '\\u003e');
 
     // Build icon map: service key → base64-encoded SVG data URI (embedded server-side,
-    // so the webview never needs to fetch anything — no async delay, no CSP connect-src needed)
+    // so the webview never needs to fetch anything — no async delay, no CSP connect-src needed).
+    //
+    // AWS icon SVGs ship with a coloured 80×80 background rect painted with the
+    // brand gradient. Our card already draws its own gradient panel behind the
+    // icon, so keeping the icon's background would just hide the panel and make
+    // every icon look identical. We strip any group whose fill is the
+    // linearGradient (matches both the `Icon-Architecture-BG` and plain
+    // `Rectangle` variants used across AWS icon revisions).
     const iconDir = path.join(this._context.extensionPath, 'media', 'aws-icons');
     const iconUriMap: Record<string, string> = {};
     try {
       const files = fs.readdirSync(iconDir);
       for (const file of files) {
-        if (file.endsWith('.svg')) {
-          const service = file.slice(0, -4); // strip .svg
-          const svgContent = fs.readFileSync(path.join(iconDir, file));
-          iconUriMap[service] = `data:image/svg+xml;base64,${svgContent.toString('base64')}`;
-        }
+        if (!file.endsWith('.svg')) continue;
+        const service = file.slice(0, -4);
+        let svg = fs.readFileSync(path.join(iconDir, file), 'utf8');
+        // Strip any group filled with the AWS linearGradient (the full-canvas
+        // colored square). Non-greedy match up to the first </g>; safe because
+        // these background groups only contain a single <rect>.
+        svg = svg.replace(/<g[^>]*fill="url\(#linearGradient[^"]*\)"[^>]*>[\s\S]*?<\/g>/g, '');
+        iconUriMap[service] = `data:image/svg+xml;base64,${Buffer.from(svg, 'utf8').toString('base64')}`;
       }
     } catch { /* icons directory not yet populated — graceful degradation */ }
 
+    // NB: `.replace(str, str)` only replaces the FIRST occurrence — use global regex
+    // for placeholders that appear more than once (e.g. {{NONCE}} on both inline
+    // <script> tags). Getting this wrong causes the CSP to reject the second
+    // script and turns the graph black.
     return template
-      .replace('{{CSP_SOURCE}}', `${this._panel.webview.cspSource} 'nonce-${nonce}'`)
-      .replace('{{NONCE}}', nonce)
-      .replace('{{VENDOR_URI}}', vendorUri.toString())
-      .replace('{{TAB_BUTTONS}}', tabButtonsHtml)
-      .replace('{{PANES}}', panesHtml)
-      .replace('{{TABS_JSON}}', safeJson(tabs))
-      .replace('{{NODE_TO_TAB_JSON}}', safeJson(nodeToTab))
-      .replace('{{ICON_URI_MAP_JSON}}', safeJson(iconUriMap))
-      .replace('{{HINT_SUBGRAPHS}}', subGraphs.length > 0 ? ' · Double-click Parallel/Map to explore sub-graph' : '');
+      .replace(/\{\{CSP_SOURCE\}\}/g, `${this._panel.webview.cspSource} 'nonce-${nonce}'`)
+      .replace(/\{\{NONCE\}\}/g, nonce)
+      .replace(/\{\{VENDOR_URI\}\}/g, vendorUri.toString())
+      .replace(/\{\{TAB_BUTTONS\}\}/g, tabButtonsHtml)
+      .replace(/\{\{PANES\}\}/g, panesHtml)
+      .replace(/\{\{TABS_JSON\}\}/g, safeJson(tabs))
+      .replace(/\{\{NODE_TO_TAB_JSON\}\}/g, safeJson(nodeToTab))
+      .replace(/\{\{ICON_URI_MAP_JSON\}\}/g, safeJson(iconUriMap))
+      .replace(/\{\{HINT_SUBGRAPHS\}\}/g, subGraphs.length > 0 ? ' · Double-click Parallel/Map to explore sub-graph' : '');
   }
 
   private _errorHtml(msg: string): string {

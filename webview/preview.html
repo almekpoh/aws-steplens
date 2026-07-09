@@ -50,100 +50,170 @@
     }
     .export-btn:hover { color: #ccc; border-color: #555; background: #222; }
 
-    /* ── Graph area ──────────────────────────────────────────────────────── */
-    #graph-area { flex: 1; position: relative; overflow: hidden; }
+    /* ── Workspace: graph pane + right sidebar ───────────────────────────── */
+    #workspace { flex: 1; display: flex; min-height: 0; overflow: hidden; }
+    #graph-area { flex: 1; position: relative; overflow: hidden; min-width: 0; }
     /* visibility:hidden keeps real dimensions (unlike display:none = 0×0),
        so Cytoscape can measure the container even before the tab is shown. */
     .graph-pane { position: absolute; top: 0; right: 0; bottom: 0; left: 0; visibility: hidden; pointer-events: none; }
     .graph-pane.active { visibility: visible; pointer-events: auto; }
     .cy-container { width: 100%; height: 100%; }
 
-    /* ── Legend ──────────────────────────────────────────────────────────── */
+    /* ── Design Reference sidebar (matches the design mockup) ─────────────── */
     #legend {
-      position: fixed; top: 46px; right: 10px;
-      background: rgba(20,20,20,0.92); border: 1px solid #333; border-radius: 6px;
-      padding: 8px 12px; font-size: 11px; color: #aaa; line-height: 1.9;
-      min-width: 145px; /* position:fixed already establishes a containing block for #legend-close */
+      width: 270px; flex-shrink: 0;
+      background: #1a1a1c; border-left: 1px solid #2a2a2a;
+      overflow-y: auto; padding: 14px 16px 20px; font-size: 11px;
+      color: #aaa; line-height: 1.9;
     }
     #legend.hidden { display: none; }
+    #legend-title {
+      font-size: 10px; font-weight: 700; text-transform: uppercase;
+      letter-spacing: 0.1em; color: #4a4a4a; margin-bottom: 10px;
+      display: flex; align-items: center; justify-content: space-between;
+    }
     #legend-close {
-      position: absolute; top: 5px; right: 7px;
       background: none; border: none; color: #555; cursor: pointer;
-      font-size: 13px; line-height: 1; padding: 0;
+      font-size: 14px; line-height: 1; padding: 0;
     }
     #legend-close:hover { color: #aaa; }
     .export-btn.active { color: #ccc; border-color: #555; background: #222; }
     .leg { display: flex; align-items: center; gap: 7px; }
-    .leg-sep { border-top: 1px solid #333; margin: 4px 0; }
-    .dot { width: 10px; height: 10px; border-radius: 2px; flex-shrink: 0; }
+    .leg-h { font-size: 10px; color: #666; margin-bottom: 3px; text-transform: uppercase; letter-spacing: .5px; }
+    .leg-sep { border-top: 1px solid #333; margin: 6px 0; }
+    .dot { width: 12px; height: 12px; border-radius: 3px; flex-shrink: 0; }
+    /* Gradient swatches — match the SVG card icon panels */
+    .dot.grad-lambda   { background: linear-gradient(to top right, #C8511B, #FF9900); }
+    .dot.grad-s3       { background: linear-gradient(to top right, #1B660F, #6CAE3E); }
+    .dot.grad-ddb      { background: linear-gradient(to top right, #2E27AD, #527FFF); }
+    .dot.grad-sns      { background: linear-gradient(to top right, #B0084D, #FF4F8B); }
+    .dot.grad-bedrock  { background: linear-gradient(to top right, #055F4E, #56C0A7); }
+    .dot.grad-gw       { background: linear-gradient(to top right, #4D27A8, #A166FF); }
+    .dot.grad-fail     { background: linear-gradient(to top right, #7a1c1c, #c0392b); }
+    .dot.grad-succeed  { background: linear-gradient(to top right, #0d5a2d, #22c55e); }
+    .dot.grad-pass     { background: linear-gradient(to top right, #2a2a2a, #6b7280); }
+    .dot.grad-wait     { background: linear-gradient(to top right, #0d3330, #4ec9b0); }
+    .dot.grad-choice   { background: linear-gradient(to top right, #5a4a00, #eab308); }
+    .dot.grad-map      { background: linear-gradient(to top right, #1B660F, #4ade80); border: 1px dashed #4ade80; }
+    .dot.grad-parallel { background: linear-gradient(to top right, #2E27AD, #818cf8); border: 1px dashed #818cf8; }
+    .pill { border: 1px solid; border-radius: 8px; padding: 1px 8px; font-size: 10px; font-family: 'JetBrains Mono', Consolas, monospace; }
     .line { width: 22px; height: 0; border-bottom: 2px solid; flex-shrink: 0; }
     .line.dashed { border-bottom-style: dashed; }
 
     #hint { position: fixed; bottom: 8px; left: 10px; font-size: 10px; color: #3a3a3a; }
+
+    /* ── Catalog view (all card variants) ─────────────────────────────────── */
+    #catalog { display: none; position: absolute; inset: 0; overflow: auto; padding: 24px 28px; background: #141414; z-index: 5; }
+    #catalog.active { display: block; }
+    .cat-section { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.1em; color: #4a4a4a; margin: 24px 0 12px; }
+    .cat-section:first-child { margin-top: 0; }
+    .cat-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 14px; }
+    .cat-item { display: flex; }
+    .cat-item img { display: block; max-width: 100%; height: auto; }
   </style>
 </head>
 <body>
   <div id="tab-bar">
     <button id="btn-back" class="back-btn" style="display:none">← Main</button>
     {{TAB_BUTTONS}}
+    <button class="export-btn" id="btn-catalog" title="Show catalog of card variants (state types + AWS services)">▦ Catalog</button>
     <div class="tab-sep"></div>
     <button class="export-btn active" id="btn-legend">☰ Legend</button>
-    <button class="export-btn" id="btn-fit">⊡ Fit</button>
+    <button class="export-btn" id="btn-zoom-out" title="Zoom out (Cmd/Ctrl + -)">−</button>
+    <button class="export-btn" id="btn-zoom-in" title="Zoom in (Cmd/Ctrl + +)">+</button>
+    <button class="export-btn" id="btn-fit" title="Fit to view (Cmd/Ctrl + 0)">⊡ Fit</button>
     <button class="export-btn" id="btn-theme" title="Toggle light/dark background">☀</button>
     <button class="export-btn" id="btn-png">⬇ PNG</button>
     <button class="export-btn" id="btn-jpg">⬇ JPEG</button>
   </div>
 
-  <div id="graph-area">
-    {{PANES}}
-  </div>
+  <div id="workspace">
+    <div id="graph-area">
+      {{PANES}}
+      <div id="catalog"></div>
+    </div>
 
   <div id="legend">
-    <button id="legend-close" title="Hide legend">×</button>
-    <div style="font-size:10px;color:#666;margin-bottom:3px;text-transform:uppercase;letter-spacing:.5px">States</div>
-    <div class="leg"><span class="dot" style="background:#1e4080;border:1.5px solid #4a9de8"></span>Task</div>
-    <div class="leg"><span class="dot" style="background:#2e2d00;border:1.5px solid #ffe033;transform:rotate(45deg)"></span>Choice</div>
-    <div class="leg"><span class="dot" style="background:#0d3330;border:1.5px solid #4ec9b0"></span>Wait</div>
-    <div class="leg"><span class="dot" style="background:#2a2a2a;border:1.5px solid #666"></span>Pass</div>
-    <div class="leg"><span class="dot" style="background:#0d3318;border:1.5px solid #4caf50;border-radius:50%"></span>Succeed</div>
-    <div class="leg"><span class="dot" style="background:#3a0d0d;border:1.5px solid #f44336;border-radius:50%"></span>Fail</div>
-    <div class="leg"><span class="dot" style="background:#2a1a3d;border:1.5px solid #a78bfa;border-style:dashed"></span>Parallel / Map</div>
-    <div class="leg"><span class="dot" style="background:#1a3d1a;border:1.5px solid #555;box-shadow:0 0 0 3px rgba(76,175,80,0.12)"></span>↺ with Retry</div>
-    <div class="leg"><span class="dot" style="background:#2a1a3d;border:1.5px solid #a78bfa;border-style:dashed"></span>‖N Parallel branches</div>
-    <div class="leg"><span class="dot" style="background:#2a1a3d;border:1.5px solid #a78bfa;border-style:dashed"></span>×N Map concurrency (×∞ = unlimited)</div>
-    <div class="leg"><span class="dot" style="background:#2a1a3d;border:1.5px solid #a78bfa;border-style:dashed"></span>⊕ Distributed Map (DISTRIBUTED)</div>
-    <div class="leg"><span class="dot" style="background:#1e4080;border:1.5px solid #4a9de8"></span>⏸ waitForTaskToken</div>
-    <div class="leg"><span class="dot" style="background:#1e4080;border:1.5px solid #4a9de8"></span>🌐 HTTP Task</div>
+    <div id="legend-title">
+      Design Reference
+      <button id="legend-close" title="Hide sidebar">×</button>
+    </div>
+    <div class="leg-h">States</div>
+    <div class="leg"><span class="dot grad-lambda"></span>Task · Lambda / Batch</div>
+    <div class="leg"><span class="dot grad-s3"></span>Task · S3 / IoT</div>
+    <div class="leg"><span class="dot grad-ddb"></span>Task · DynamoDB / ML</div>
+    <div class="leg"><span class="dot grad-sns"></span>Task · SNS / SQS / EventBridge</div>
+    <div class="leg"><span class="dot grad-bedrock"></span>Task · Bedrock / SageMaker</div>
+    <div class="leg"><span class="dot grad-gw"></span>Task · API Gateway / Glue / Athena</div>
+    <div class="leg"><span class="dot grad-choice"></span>Choice</div>
+    <div class="leg"><span class="dot grad-wait"></span>Wait</div>
+    <div class="leg"><span class="dot grad-pass"></span>Pass</div>
+    <div class="leg"><span class="dot grad-succeed"></span>Succeed</div>
+    <div class="leg"><span class="dot grad-fail"></span>Fail</div>
+    <div class="leg"><span class="dot grad-map"></span>Map iterator</div>
+    <div class="leg"><span class="dot grad-parallel"></span>Parallel branch</div>
+    <div class="leg-sep"></div>
+    <div class="leg-h">Badges</div>
+    <div class="leg"><span class="pill" style="color:#7a7a7a;background:#1e1e1e;border-color:#444">↺ Retry: N</span></div>
+    <div class="leg"><span class="pill" style="color:#4ade80;background:#081808;border-color:#4ade80">×N Map (×∞ unlimited)</span></div>
+    <div class="leg"><span class="pill" style="color:#818cf8;background:#080820;border-color:#818cf8">‖N Parallel branches</span></div>
+    <div class="leg"><span class="pill" style="color:#fbbf24;background:#180f04;border-color:#92400e">⏱ waitForTaskToken</span></div>
     <div class="leg"><span class="dot" style="background:#2a1800;border:2px solid #f5a623"></span>Current (cursor)</div>
     <div class="leg-sep"></div>
-    <div style="font-size:10px;color:#666;margin-bottom:3px;text-transform:uppercase;letter-spacing:.5px">Transitions</div>
+    <div class="leg-h">Transitions</div>
     <div class="leg"><span class="line" style="border-color:#555"></span>Next</div>
     <div class="leg"><span class="line" style="border-color:#a07800"></span>Choice branch</div>
     <div class="leg"><span class="line dashed" style="border-color:#c0392b"></span>Catch (error)</div>
   </div>
+  </div><!-- /#workspace -->
 
   <div id="hint">Scroll to zoom · Drag to pan · Click node to jump{{HINT_SUBGRAPHS}}</div>
+  <div id="diag" style="display:none;position:fixed;bottom:8px;right:10px;background:rgba(20,20,20,0.92);border:1px solid #333;border-radius:4px;padding:4px 8px;font-size:10px;color:#f87171;font-family:Consolas,monospace;max-width:340px;line-height:1.4;pointer-events:none;z-index:9999;white-space:pre-wrap"></div>
 
   <script nonce="{{NONCE}}">
     // ── Fatal error fallback ──────────────────────────────────────────────
+    // Diagnostic overlay: hidden unless something goes wrong or ?debug=1 is set
+    const DIAG_ENABLED = /[?&]debug=1\b/.test(location.search);
+    function diag(msg) {
+      const el = document.getElementById('diag');
+      if (!el) return;
+      const isErr = /^ERR/.test(msg);
+      if (isErr || DIAG_ENABLED) {
+        el.style.display = 'block';
+        el.style.color = isErr ? '#f87171' : '#888';
+        el.textContent = msg;
+      }
+    }
     function showFatalError(err) {
-      const detail = String(err) +
+      const detail = String(err && err.stack ? err.stack : err) +
         '\n\nTry reloading the window (Ctrl+Shift+P → "Reload Window").\n' +
         'If the problem persists, please open an issue at:\n' +
         'github.com/almekpoh/aws-steplens/issues';
-      document.getElementById('graph-area').innerHTML =
+      const area = document.getElementById('graph-area');
+      if (area) area.innerHTML =
         '<div style="padding:24px;color:#f44336;font-family:monospace;font-size:12px;white-space:pre-wrap">' +
         '<strong>StepLens — graph rendering error</strong>\n\n' + detail + '</div>';
+      diag('ERR: ' + String(err).slice(0, 300));
     }
     window.onerror = (_msg, _src, _line, _col, err) => { showFatalError(err || _msg); return true; };
+    window.addEventListener('unhandledrejection', e => showFatalError(e.reason));
 
     try {
+
+    diag('boot: init');
+    if (typeof cytoscape === 'undefined') { diag('ERR: cytoscape global missing (vendor.js not loaded)'); throw new Error('cytoscape global missing — vendor.js failed to load'); }
+    if (typeof cytoscapeDagre === 'undefined') { diag('ERR: cytoscapeDagre global missing'); throw new Error('cytoscapeDagre global missing'); }
 
     const vscode = acquireVsCodeApi();
     const TABS        = {{TABS_JSON}};
     const NODE_TO_TAB = {{NODE_TO_TAB_JSON}};
+    diag('boot: TABS.len=' + (TABS ? TABS.length : 'null') + ' iconMap.len=' + Object.keys(window.ICON_URI_MAP||{}).length);
 
     cytoscape.use(cytoscapeDagre);
+    // Silence Cytoscape console noise. `wheelSensitivity: 0.5` (below) triggers
+    // a "custom wheel sensitivity" warning; we set it intentionally because the
+    // default is too aggressive on trackpads. Warnings are dev-only noise here.
+    if (typeof cytoscape.warnings === 'function') cytoscape.warnings(false);
 
     // ── Colour palette ────────────────────────────────────────────────────
     const NS = {
@@ -160,56 +230,77 @@
       GHOST:    { bg: '#2a0000', border: '#f44336', shape: 'rectangle'       },
     };
 
-    // ── Service icon colour accents (left bar + icon bg) ──────────────────────
-    const SERVICE_ACCENT = {
-      'lambda':           '#FF9900',
-      'states':           '#E7157B',
-      'ecs':              '#FF4B00',
-      'fargate':          '#FF4B00',
-      'batch':            '#FF9900',
-      'dynamodb':         '#3334B9',
-      's3':               '#3F8624',
-      'athena':           '#8C4FFF',
-      'glue':             '#8C4FFF',
-      'databrew':         '#8C4FFF',
-      'kinesis':          '#8C4FFF',
-      'firehose':         '#8C4FFF',
-      'elasticmapreduce': '#FF9900',
-      'emr-containers':   '#FF9900',
-      'emr-serverless':   '#FF9900',
-      'appsync':          '#E7157B',
-      'apigateway':       '#A166FF',
-      'events':           '#E7157B',
-      'eventbridge':      '#E7157B',
-      'scheduler':        '#E7157B',
-      'sns':              '#E7157B',
-      'sqs':              '#C7131F',
-      'sagemaker':        '#01A88D',
-      'comprehend':       '#3334B9',
-      'rekognition':      '#3334B9',
-      'textract':         '#3334B9',
-      'translate':        '#3334B9',
-      'polly':            '#3334B9',
-      'transcribe':       '#3334B9',
-      'lex':              '#3334B9',
-      'cloudformation':   '#C7131F',
-      'ssm':              '#C7131F',
-      'secretsmanager':   '#C7131F',
-      'mediaconvert':     '#3334B9',
-      'iot':              '#3F8624',
-      'codebuild':        '#3334B9',
-      'bedrock':          '#01A88D',
-      'bedrock-agent':    '#01A88D',
-      'http':             '#5A5A5A',
+    // ── AWS brand gradient palette (dark → brand, "to top right") ─────────────
+    // Two-tuple = [dark, brand]. Used for the left icon panel of each service
+    // card; `brand` also drives the Cytoscape border colour and the sidebar
+    // service legend. Synthetic keys (__fail__, __map__, __parallel__) render
+    // non-Task flow-control cards with the same visual language.
+    const SERVICE_GRADIENT = {
+      // Compute / orchestration — orange
+      'lambda':           ['#C8511B', '#FF9900'],
+      'batch':            ['#C8511B', '#FF9900'],
+      'ecs':              ['#C8511B', '#FF9900'],
+      'fargate':          ['#C8511B', '#FF9900'],
+      'elasticmapreduce': ['#C8511B', '#FF9900'],
+      'emr-containers':   ['#C8511B', '#FF9900'],
+      'emr-serverless':   ['#C8511B', '#FF9900'],
+      // Storage / IoT — green
+      's3':               ['#1B660F', '#6CAE3E'],
+      'iot':              ['#1B660F', '#6CAE3E'],
+      // Databases / ML classification / dev tooling — blue
+      'dynamodb':         ['#2E27AD', '#527FFF'],
+      'comprehend':       ['#2E27AD', '#527FFF'],
+      'rekognition':      ['#2E27AD', '#527FFF'],
+      'textract':         ['#2E27AD', '#527FFF'],
+      'translate':        ['#2E27AD', '#527FFF'],
+      'polly':            ['#2E27AD', '#527FFF'],
+      'transcribe':       ['#2E27AD', '#527FFF'],
+      'lex':              ['#2E27AD', '#527FFF'],
+      'mediaconvert':     ['#2E27AD', '#527FFF'],
+      'codebuild':        ['#2E27AD', '#527FFF'],
+      // Messaging / orchestration — pink
+      'sns':              ['#B0084D', '#FF4F8B'],
+      'sqs':              ['#B0084D', '#FF4F8B'],
+      'events':           ['#B0084D', '#FF4F8B'],
+      'eventbridge':      ['#B0084D', '#FF4F8B'],
+      'scheduler':        ['#B0084D', '#FF4F8B'],
+      'appsync':          ['#B0084D', '#FF4F8B'],
+      'states':           ['#B0084D', '#FF4F8B'],
+      // ML / GenAI — teal
+      'sagemaker':        ['#055F4E', '#56C0A7'],
+      'bedrock':          ['#055F4E', '#56C0A7'],
+      'bedrock-agent':    ['#055F4E', '#56C0A7'],
+      // Integration / analytics — purple
+      'apigateway':       ['#4D27A8', '#A166FF'],
+      'glue':             ['#4D27A8', '#A166FF'],
+      'databrew':         ['#4D27A8', '#A166FF'],
+      'athena':           ['#4D27A8', '#A166FF'],
+      'kinesis':          ['#4D27A8', '#A166FF'],
+      'firehose':         ['#4D27A8', '#A166FF'],
+      // Ops / management — red
+      'cloudformation':   ['#C7131F', '#E8454B'],
+      'ssm':              ['#C7131F', '#E8454B'],
+      'secretsmanager':   ['#C7131F', '#E8454B'],
+      // Fallback + synthetic keys
+      'http':             ['#3a3a3a', '#5A5A5A'],
+      '__fail__':         ['#7a1c1c', '#c0392b'],
+      '__succeed__':      ['#0d5a2d', '#22c55e'],
+      '__map__':          ['#1B660F', '#4ade80'],
+      '__parallel__':     ['#2E27AD', '#818cf8'],
+      '__pass__':         ['#2a2a2a', '#6b7280'],
+      '__wait__':         ['#0d3330', '#4ec9b0'],
+      '__choice__':       ['#5a4a00', '#eab308'],
     };
 
-    // SVG card cache — key: `${service}|${label}|${theme}` → data URI
+    function serviceAccent(service) {
+      return (SERVICE_GRADIENT[service] || SERVICE_GRADIENT.http)[1];
+    }
+
+    // SVG card cache — key encodes every input to buildServiceCard
     const CARD_CACHE = {};
 
-    /** Measure approximate text width in px at font-size 13 Consolas (rough heuristic) */
-    function approxWidth(text) {
-      return Math.ceil(text.length * 7.5);
-    }
+    /** Rough char-width heuristic at font-size 12 monospace */
+    function approxWidth(text) { return Math.ceil(text.length * 7.4); }
 
     /** Escape text for safe embedding inside SVG attribute values and content */
     function svgEsc(s) {
@@ -220,75 +311,251 @@
         .replace(/"/g, '&quot;');
     }
 
+    // Inline glyph SVG for cards without an AWS service icon
+    const GLYPH_MAP =
+      '<g>' +
+        '<rect x="-8" y="-8" width="7" height="7" rx="1" fill="white" fill-opacity="0.85"/>' +
+        '<rect x="1"  y="-8" width="7" height="7" rx="1" fill="white" fill-opacity="0.55"/>' +
+        '<rect x="-8" y="1"  width="7" height="7" rx="1" fill="white" fill-opacity="0.35"/>' +
+      '</g>';
+    const GLYPH_PARALLEL =
+      '<g stroke="white" stroke-width="2.4" stroke-linecap="round">' +
+        '<line x1="-4" y1="-8" x2="-4" y2="8"/>' +
+        '<line x1="4"  y1="-8" x2="4"  y2="8"/>' +
+      '</g>';
+    const GLYPH_FAIL =
+      '<g stroke="white" stroke-width="1.8" fill="none" stroke-linecap="round">' +
+        '<circle cx="0" cy="0" r="8"/>' +
+        '<path d="M -4 -4 L 4 4 M 4 -4 L -4 4"/>' +
+      '</g>';
+    const GLYPH_SUCCEED =
+      '<g stroke="white" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round">' +
+        '<circle cx="0" cy="0" r="8"/>' +
+        '<path d="M -4 0 L -1 3 L 5 -3"/>' +
+      '</g>';
+    const GLYPH_PASS =
+      '<g stroke="white" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round">' +
+        '<path d="M -8 0 L 6 0"/>' +
+        '<path d="M 2 -4 L 6 0 L 2 4"/>' +
+      '</g>';
+    const GLYPH_WAIT =
+      '<g stroke="white" stroke-width="1.8" fill="none" stroke-linecap="round">' +
+        '<circle cx="0" cy="0" r="8"/>' +
+        '<path d="M 0 -4 L 0 0 L 3 2"/>' +
+      '</g>';
+    const GLYPH_CHOICE =
+      '<g stroke="white" stroke-width="1.8" fill="none" stroke-linejoin="round">' +
+        '<path d="M -8 0 L 0 -8 L 8 0 L 0 8 Z"/>' +
+        '<path d="M -3 0 L 3 0 M 0 -3 L 0 3" stroke-linecap="round"/>' +
+      '</g>';
+
     /**
-     * Build a card SVG for a Task node with a recognised AWS service.
-     * Returns a data:image/svg+xml URI (URL-encoded, NOT base64).
+     * Build a card SVG (data URI) for a graph node.
      *
      * Layout (dark theme):
-     *   - Rounded rectangle card (bg tinted with service colour at low opacity)
-     *   - 4px coloured left accent bar
-     *   - 44×44 coloured icon square with official SVG icon
-     *   - Subtitle line: "Amazon Lambda: Invoke" (muted, 9px)
-     *   - State name: "MyFunctionCall" (bright, 13px bold)
-     *   - Border: service colour at 35% opacity
+     *   +--------------------------------+  <-- top-right badge overhangs (viewBox y = -14..0)
+     *   |###| StateName          Retry ↺ |
+     *   |###| Service · Action           |
+     *   |###| Meta line (green/indigo)   |
+     *   +--------------------------------+
+     *
+     * ### = 44px gradient panel with the AWS icon (or a synthetic glyph for
+     * Map/Parallel/Fail). Icon-side corners are rounded on the left only; the
+     * card body sits flush against the right side of the panel.
+     *
+     * Returns { uri, cardW, cardH }. cardH already includes the badge overhang
+     * so Cytoscape's bounding box matches what's drawn.
      */
-    function buildServiceCard(service, resourceLabel, stateName, isLight) {
-      const accent    = SERVICE_ACCENT[service] || '#5A5A5A';
-      const iconUri   = (window.ICON_URI_MAP || {})[service];
-      const cardBg    = isLight ? '#f0f0f0' : '#161f2e';
-      const textMain  = isLight ? '#1a1a1a' : '#e8e8e8';
-      const textSub   = isLight ? '#666666' : '#7a8a9a';
-      const borderClr = accent;
+    function buildServiceCard(opts) {
+      var service          = opts.service;
+      var resourceLabel    = opts.resourceLabel;
+      var stateName        = opts.stateName;
+      var isLight          = opts.isLight;
+      var hasRetry         = opts.hasRetry;
+      var retryCount       = opts.retryCount;
+      var isWaitForToken   = opts.isWaitForToken;
+      var mapConcurrency   = opts.mapConcurrency;
+      var parallelBranches = opts.parallelBranches;
+      var isDistributedMap = opts.isDistributedMap;
+      var failError        = opts.failError;
 
-      // Truncate subtitle and label to fit
-      const subtitle = (resourceLabel || service).length > 30
-        ? (resourceLabel || service).slice(0, 28) + '\u2026'
-        : (resourceLabel || service);
-      const mainLabel = stateName.length > 24
-        ? stateName.slice(0, 22) + '\u2026'
-        : stateName;
+      var gradient = SERVICE_GRADIENT[service] || SERVICE_GRADIENT.http;
+      var iconUri  = (window.ICON_URI_MAP || {})[service];
+      var cardBg   = isLight ? '#ececed' : '#252527';
+      var cardBrdr = isLight ? '#c8c8ca' : '#333333';
+      var textMain = isLight ? '#1a1a1a' : '#e0e0e0';
+      var textSub  = isLight ? '#6a6a6a' : '#6a6a6a';
 
-      const minW  = 200;
-      const cardW = Math.max(minW, 68 + approxWidth(mainLabel) + 16);
-      const cardH = 68;
+      // Subtitle: resourceLabel wins; otherwise generic per node kind
+      var subtitle = resourceLabel ||
+        (failError                      ? '⚠ Catch · ' + failError :
+         service === '__succeed__'      ? 'Succeeded · terminal state' :
+         service === '__pass__'         ? 'Pass · no-op / transform' :
+         service === '__wait__'         ? 'Wait · time delay' :
+         service === '__choice__'       ? 'Choice · branch on condition' :
+         mapConcurrency !== undefined   ? 'Map state' :
+         parallelBranches !== undefined ? 'Parallel state' :
+         (service || ''));
+      var subtitleTx = subtitle.length > 32 ? subtitle.slice(0, 30) + '…' : subtitle;
+      var mainLabel  = stateName.length > 24 ? stateName.slice(0, 22) + '…' : stateName;
 
-      // Icon area
-      const iconBgX = 10, iconBgY = 12, iconSz = 44;
-      // Text area
-      const textX = 64;
-
-      // Build icon element — inline <image> if SVG loaded, coloured initials otherwise
-      let iconContent = '';
-      if (iconUri) {
-        iconContent = `<image href="${iconUri}" x="${iconBgX + 8}" y="${iconBgY + 8}" width="${iconSz - 16}" height="${iconSz - 16}"/>`;
-      } else {
-        const initials = svgEsc(service.slice(0, 2).toUpperCase());
-        iconContent = `<text x="${iconBgX + iconSz / 2}" y="${iconBgY + iconSz / 2 + 5}" fill="white" font-size="13" font-family="monospace" font-weight="bold" text-anchor="middle">${initials}</text>`;
+      // Meta line (colour reflects state kind)
+      var metaText = '', metaColor = '';
+      if (mapConcurrency !== undefined) {
+        metaText  = isDistributedMap ? 'Distributed Map' : 'Map iterator';
+        metaColor = '#4ade80';
+      } else if (parallelBranches !== undefined) {
+        metaText  = 'Parallel branch';
+        metaColor = '#818cf8';
+      } else if (failError) {
+        metaText  = 'Fail state';
+        metaColor = '#f87171';
+      } else if (service === '__succeed__') {
+        metaText  = 'Succeed state';
+        metaColor = '#22c55e';
+      } else if (service === '__pass__') {
+        metaText  = 'Pass state';
+        metaColor = '#9ca3af';
+      } else if (service === '__wait__') {
+        metaText  = 'Wait state';
+        metaColor = '#4ec9b0';
+      } else if (service === '__choice__') {
+        metaText  = 'Choice state';
+        metaColor = '#eab308';
       }
 
-      const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${cardW}" height="${cardH}">
-  <defs>
-    <clipPath id="card-clip"><rect width="${cardW}" height="${cardH}" rx="8"/></clipPath>
-  </defs>
-  <!-- Card background -->
-  <rect width="${cardW}" height="${cardH}" rx="8" fill="${cardBg}"/>
-  <!-- Subtle service tint overlay -->
-  <rect width="${cardW}" height="${cardH}" rx="8" fill="${accent}" fill-opacity="0.07"/>
-  <!-- Border -->
-  <rect x="0.5" y="0.5" width="${cardW - 1}" height="${cardH - 1}" rx="7.5" fill="none" stroke="${borderClr}" stroke-width="1.5" stroke-opacity="0.4"/>
-  <!-- Left accent bar -->
-  <rect x="0" y="0" width="4" height="${cardH}" rx="2" fill="${accent}"/>
-  <!-- Icon background square -->
-  <rect x="${iconBgX}" y="${iconBgY}" width="${iconSz}" height="${iconSz}" rx="7" fill="${accent}"/>
-  <!-- Icon -->
-  ${iconContent}
-  <!-- Subtitle -->
-  <text x="${textX}" y="28" fill="${textSub}" font-size="9" font-family="Consolas,monospace">${svgEsc(subtitle)}</text>
-  <!-- Main label -->
-  <text x="${textX}" y="46" fill="${textMain}" font-size="13" font-family="Consolas,monospace" font-weight="bold">${svgEsc(mainLabel)}</text>
-</svg>`;
+      // Determine badge (single, by priority)
+      var badge = null;
+      if (mapConcurrency !== undefined) {
+        var mapN = mapConcurrency === 0 ? '∞' : String(mapConcurrency);
+        badge = { text: '×' + mapN, fg: '#4ade80', bg: '#081808', border: '#4ade80' };
+      } else if (parallelBranches !== undefined) {
+        badge = { text: '‖' + parallelBranches, fg: '#818cf8', bg: '#080820', border: '#818cf8' };
+      } else if (isWaitForToken) {
+        badge = { text: '⏱ waitForTaskToken', fg: '#fbbf24', bg: '#180f04', border: '#92400e' };
+      } else if (hasRetry) {
+        var rtxt = retryCount && retryCount >= 1 ? '↺ Retry: ' + retryCount : '↺ Retry';
+        badge = { text: rtxt, fg: '#7a7a7a', bg: '#1e1e1e', border: '#444444' };
+      }
 
-      return 'data:image/svg+xml,' + encodeURIComponent(svg);
+      var hasMeta = !!metaText;
+      var cardH = hasMeta ? 76 : 68;
+      var minW  = hasMeta ? 220 : 200;
+      var cardW = Math.max(minW, 60 + approxWidth(mainLabel) + 24);
+
+      var iconPanelW = 44;
+      var textX = iconPanelW + 12;
+
+      // Icon panel: rounded left corners only (right edge sits flush against text body)
+      var r = 7;
+      var iconPanelPath =
+        'M ' + r + ' 0 ' +
+        'L ' + iconPanelW + ' 0 ' +
+        'L ' + iconPanelW + ' ' + cardH + ' ' +
+        'L ' + r + ' ' + cardH + ' ' +
+        'Q 0 ' + cardH + ' 0 ' + (cardH - r) + ' ' +
+        'L 0 ' + r + ' ' +
+        'Q 0 0 ' + r + ' 0 Z';
+
+      // Icon: real AWS icon if available, otherwise synthetic glyph or initials
+      var iconCenterX = iconPanelW / 2;
+      var iconCenterY = cardH / 2;
+      var iconContent;
+      if (iconUri) {
+        var sz = 26;
+        iconContent = '<image href="' + iconUri + '" x="' + (iconCenterX - sz/2) + '" y="' + (iconCenterY - sz/2) + '" width="' + sz + '" height="' + sz + '"/>';
+      } else if (service === '__map__') {
+        iconContent = '<g transform="translate(' + iconCenterX + ' ' + iconCenterY + ')">' + GLYPH_MAP + '</g>';
+      } else if (service === '__parallel__') {
+        iconContent = '<g transform="translate(' + iconCenterX + ' ' + iconCenterY + ')">' + GLYPH_PARALLEL + '</g>';
+      } else if (service === '__fail__') {
+        iconContent = '<g transform="translate(' + iconCenterX + ' ' + iconCenterY + ')">' + GLYPH_FAIL + '</g>';
+      } else if (service === '__succeed__') {
+        iconContent = '<g transform="translate(' + iconCenterX + ' ' + iconCenterY + ')">' + GLYPH_SUCCEED + '</g>';
+      } else if (service === '__pass__') {
+        iconContent = '<g transform="translate(' + iconCenterX + ' ' + iconCenterY + ')">' + GLYPH_PASS + '</g>';
+      } else if (service === '__wait__') {
+        iconContent = '<g transform="translate(' + iconCenterX + ' ' + iconCenterY + ')">' + GLYPH_WAIT + '</g>';
+      } else if (service === '__choice__') {
+        iconContent = '<g transform="translate(' + iconCenterX + ' ' + iconCenterY + ')">' + GLYPH_CHOICE + '</g>';
+      } else {
+        var initials = svgEsc((service || '?').slice(0, 2).toUpperCase());
+        iconContent = '<text x="' + iconCenterX + '" y="' + (iconCenterY + 4) + '" fill="white" font-size="13" font-family="monospace" font-weight="bold" text-anchor="middle">' + initials + '</text>';
+      }
+
+      // Border style: dashed for Map/Parallel container states
+      var isDashed = mapConcurrency !== undefined || parallelBranches !== undefined;
+      var strokeCol = isDashed
+        ? (parallelBranches !== undefined ? '#818cf8' : '#4ade80')
+        : cardBrdr;
+      var strokeAttrs = isDashed
+        ? 'stroke="' + strokeCol + '" stroke-width="1.5" stroke-dasharray="6,3"'
+        : 'stroke="' + strokeCol + '" stroke-width="1.5"';
+
+      // Badge markup (bottom of the pill overlaps the top edge of the card)
+      var badgeMarkup = '';
+      if (badge) {
+        var padH = 6;
+        var badgeH = 15;
+        var badgeW = Math.max(28, approxWidth(badge.text) + padH * 2 + 2);
+        var badgeX = cardW - badgeW - 8;
+        var badgeY = -8;
+        badgeMarkup =
+          '<g>' +
+            '<rect x="' + badgeX + '" y="' + badgeY + '" width="' + badgeW + '" height="' + badgeH + '" rx="7.5" fill="' + badge.bg + '" stroke="' + badge.border + '" stroke-width="1"/>' +
+            '<text x="' + (badgeX + badgeW / 2) + '" y="' + (badgeY + 10.5) + '" text-anchor="middle" fill="' + badge.fg + '" font-size="9.5" font-weight="600" font-family="Consolas, monospace">' + svgEsc(badge.text) + '</text>' +
+          '</g>';
+      }
+
+      // Meta line
+      var metaMarkup = hasMeta
+        ? '<text x="' + textX + '" y="63" fill="' + metaColor + '" font-size="9" opacity="0.85" font-family="\'Segoe UI\', sans-serif">' + svgEsc(metaText) + '</text>'
+        : '';
+
+      // ViewBox extends above the card so the badge overhang isn't clipped
+      var vbY = -14;
+      var vbH = cardH + 14;
+
+      var svg =
+        '<svg xmlns="http://www.w3.org/2000/svg" width="' + cardW + '" height="' + vbH + '" viewBox="0 ' + vbY + ' ' + cardW + ' ' + vbH + '">' +
+          '<defs>' +
+            '<linearGradient id="g" x1="0" y1="1" x2="1" y2="0">' +
+              '<stop offset="0%" stop-color="' + gradient[0] + '"/>' +
+              '<stop offset="100%" stop-color="' + gradient[1] + '"/>' +
+            '</linearGradient>' +
+          '</defs>' +
+          '<rect x="0.5" y="0.5" width="' + (cardW - 1) + '" height="' + (cardH - 1) + '" rx="8" fill="' + cardBg + '" ' + strokeAttrs + '/>' +
+          '<path d="' + iconPanelPath + '" fill="url(#g)"/>' +
+          iconContent +
+          '<text x="' + textX + '" y="28" fill="' + textMain + '" font-size="12" font-weight="600" font-family="Consolas, monospace">' + svgEsc(mainLabel) + '</text>' +
+          '<text x="' + textX + '" y="45" fill="' + textSub + '" font-size="10" font-family="\'Segoe UI\', sans-serif">' + svgEsc(subtitleTx) + '</text>' +
+          metaMarkup +
+          badgeMarkup +
+        '</svg>';
+
+      return {
+        uri: 'data:image/svg+xml,' + encodeURIComponent(svg),
+        cardW: cardW,
+        cardH: vbH,
+      };
+    }
+
+    /** Cache-key wrapper — returns the same shape as buildServiceCard(). */
+    function serviceCardCached(opts) {
+      var key = [
+        opts.service,
+        opts.stateName,
+        opts.isLight ? 'l' : 'd',
+        opts.hasRetry ? (opts.retryCount || 1) : 0,
+        opts.isWaitForToken ? 1 : 0,
+        opts.mapConcurrency === undefined ? '' : opts.mapConcurrency,
+        opts.parallelBranches === undefined ? '' : opts.parallelBranches,
+        opts.isDistributedMap ? 1 : 0,
+        opts.failError || '',
+        opts.resourceLabel || '',
+      ].join('|');
+      if (!CARD_CACHE[key]) CARD_CACHE[key] = buildServiceCard(opts);
+      return CARD_CACHE[key];
     }
 
     const CY_STYLE = [
@@ -327,16 +594,8 @@
         selector: 'node[type="GHOST"]',
         style: { 'border-style': 'dashed', 'border-width': 2, 'color': '#f44336', 'font-style': 'italic', 'font-size': 10 }
       },
-      // Parallel/Map: dashed border to signal clickable expansion
-      {
-        selector: 'node[type="Parallel"], node[type="Map"]',
-        style: { 'border-style': 'dashed', 'border-width': 2.5, 'font-style': 'italic' }
-      },
-      // Retry: subtle green underline glow
-      {
-        selector: 'node[hasRetry="true"]',
-        style: { 'underlay-color': '#4caf50', 'underlay-opacity': 0.08, 'underlay-padding': 3 }
-      },
+      // Parallel/Map/Retry/Fail styling is drawn inside the SVG card itself
+      // (dashed border, corner badge, gradient panel) — no Cytoscape overlay needed.
       {
         selector: 'node:active',
         style: { 'overlay-opacity': 0 }
@@ -357,11 +616,23 @@
           'padding':             0,
         }
       },
+      // Highlighted (current cursor state): thin golden glow so neighbouring
+      // cards stay legible. Card nodes have border-width=0, so the ring is
+      // drawn via `overlay` rather than the shape border.
       {
         selector: 'node.highlighted',
         style: {
-          'border-color': '#f5a623', 'border-width': 3.5, 'background-color': '#2a1800',
-          'overlay-color': '#f5a623', 'overlay-opacity': 0.15, 'overlay-padding': 6,
+          'overlay-color': '#f5a623', 'overlay-opacity': 0.22, 'overlay-padding': 3,
+        }
+      },
+      // Non-card highlighted nodes (START / END / GHOST): add a golden border
+      // and darkened fill so the highlight also reads on plain Cytoscape shapes.
+      // NB: Cytoscape's selector grammar does not support :not() — we filter by
+      // the explicit data(isCard) flag set in buildElements() instead.
+      {
+        selector: 'node.highlighted[isCard = 0]',
+        style: {
+          'border-color': '#f5a623', 'border-width': 3, 'background-color': '#2a1800',
         }
       },
       {
@@ -372,7 +643,8 @@
           'arrow-scale':           0.9,
           'line-color':            '#3d3d3d',
           'target-arrow-color':    '#3d3d3d',
-          'label':                 'data(label)',
+          // 'label' was deprecated for edges in cytoscape ≥ 3.28; use 'content' instead
+          'content':               'data(label)',
           'font-size':             9,
           'font-family':           'Consolas, monospace',
           'color':                 '#858585',
@@ -405,43 +677,72 @@
       },
     ];
 
+    // Card nodes are 200-320px wide × 68-82px tall — much larger than the
+    // previous label-only rectangles (~140×32). Bump the Dagre spacing so the
+    // highlight halo of one card doesn't overlap its neighbour.
     const LAYOUT = {
       name:    'dagre',
       rankDir: 'TB',
       ranker:  'network-simplex',
-      nodeSep: 60,
-      rankSep: 90,
-      edgeSep: 20,
+      nodeSep: 90,
+      rankSep: 130,
+      edgeSep: 24,
       padding: 40,
       animate: false,
     };
 
+    /**
+     * Decide whether a graph node should render as a full SVG card and, if so,
+     * with which `service` key. Returns null for nodes that stay as plain
+     * Cytoscape shapes (START/END/Choice/Succeed/Wait/Pass/GHOST).
+     */
+    function cardServiceFor(n) {
+      if (n.type === 'Task' && n.service) return n.service;
+      if (n.type === 'Task')     return 'http';         // unrecognised task → generic card
+      if (n.type === 'Fail')     return '__fail__';
+      if (n.type === 'Succeed')  return '__succeed__';
+      if (n.type === 'Pass')     return '__pass__';
+      if (n.type === 'Wait')     return '__wait__';
+      if (n.type === 'Choice')   return '__choice__';
+      if (n.type === 'Map')      return n.service || '__map__';
+      if (n.type === 'Parallel') return n.service || '__parallel__';
+      // START / END / GHOST stay as plain Cytoscape shapes
+      return null;
+    }
+
     function buildElements(graphData, isLight) {
       const nodes = graphData.nodes.map(n => {
         const s = NS[n.type] || NS.Task;
-        const cacheKey = n.service ? `${n.service}|${n.id}|${isLight ? 'l' : 'd'}` : null;
+        const cardService = cardServiceFor(n);
 
-        if (n.type === 'Task' && n.service) {
-          // Check cache first
-          if (!CARD_CACHE[cacheKey]) {
-            CARD_CACHE[cacheKey] = buildServiceCard(n.service, n.resourceLabel, n.id, isLight);
-          }
-          const cardUri = CARD_CACHE[cacheKey];
-          const accent = SERVICE_ACCENT[n.service] || s.border;
+        if (cardService) {
+          const card = serviceCardCached({
+            service:          cardService,
+            resourceLabel:    n.resourceLabel,
+            stateName:        n.id,
+            isLight:          isLight,
+            hasRetry:         n.hasRetry,
+            retryCount:       n.retryCount,
+            isWaitForToken:   n.isWaitForToken,
+            mapConcurrency:   n.mapConcurrency,
+            parallelBranches: n.parallelBranches,
+            isDistributedMap: n.isDistributedMap,
+            failError:        n.failError,
+          });
           return {
             data: {
               id: n.id,
-              label: '',           // text drawn inside SVG card
+              label: '',
               type: n.type,
               bg: s.bg,
-              border: accent,
+              border: serviceAccent(cardService),
               shape: 'round-rectangle',
-              hasRetry: n.hasRetry ? 'true' : 'false',
-              svgCard: cardUri,
-              cardW: Math.max(200, 68 + Math.ceil(n.id.length * 7.5) + 16),
-              cardH: 68,
-              service: n.service || '',
+              svgCard: card.uri,
+              cardW: card.cardW,
+              cardH: card.cardH,
+              service: cardService,
               resourceLabel: n.resourceLabel || '',
+              isCard: 1,
             }
           };
         }
@@ -453,8 +754,8 @@
             type: n.type,
             bg: s.bg,
             border: s.border,
+            isCard: 0,
             shape: s.shape,
-            hasRetry: n.hasRetry ? 'true' : 'false',
             service: '',
             resourceLabel: '',
           }
@@ -482,6 +783,7 @@
       return false;
     }
     let lightTheme = detectLight();
+    diag('boot: theme=' + (lightTheme?'light':'dark'));
 
     // ── Initialise ALL Cytoscape instances upfront ────────────────────────
     // Using visibility:hidden keeps real container dimensions, so every
@@ -491,17 +793,26 @@
 
     TABS.forEach(tab => {
       const container = document.getElementById('cy-' + tab.id);
-      if (!container) return;
+      if (!container) { diag('WARN: no container for tab ' + tab.id); return; }
+
+      let elements;
+      try {
+        elements = buildElements(tab.data, lightTheme);
+      } catch (e) {
+        diag('ERR buildElements[' + tab.id + ']: ' + e.message);
+        throw e;
+      }
 
       const cy = cytoscape({
         container,
-        elements: buildElements(tab.data, lightTheme),
+        elements,
         style: CY_STYLE,
         layout: LAYOUT,
         wheelSensitivity: 0.5,
-        minZoom: 0.15,
-        maxZoom: 3,
+        minZoom: 0.1,
+        maxZoom: 5,
       });
+      diag('boot: cy[' + tab.id + '] nodes=' + cy.nodes().length + ' edges=' + cy.edges().length);
 
       // Single click → jump to state in editor (use id = state name)
       cy.on('tap', 'node', evt => {
@@ -529,13 +840,23 @@
     // after the first paint, guaranteeing real container sizes.
     requestAnimationFrame(() => {
       Object.entries(instances).forEach(([id, cy]) => {
+        const c = cy.container();
         cy.resize();
-        if (id === activeTabId) cy.fit(undefined, 40);
+        if (id === activeTabId) {
+          cy.fit(undefined, 40);
+          diag('ready: nodes=' + cy.nodes().length + ' edges=' + cy.edges().length
+            + ' container=' + (c ? c.clientWidth + 'x' + c.clientHeight : 'null')
+            + ' zoom=' + cy.zoom().toFixed(2));
+        }
       });
     });
 
     // ── Tab switching ─────────────────────────────────────────────────────
     function switchTab(id) {
+      // Any tab click should also close the catalog overlay if it's open
+      if (typeof setCatalog === 'function' && catalog.classList.contains('active')) {
+        setCatalog(false);
+      }
       document.querySelectorAll('.graph-pane').forEach(p => p.classList.remove('active'));
       document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
       document.getElementById('pane-' + id)?.classList.add('active');
@@ -554,28 +875,91 @@
     // ── Theme application ─────────────────────────────────────────────────
     function applyTheme(light) {
       lightTheme = light;
-      // Update body background for dark/light
       document.body.style.background = light ? '#f5f5f5' : '#141414';
-      // Flush card SVG cache and rebuild for all instances
+      // Flush the card cache and rebuild the graph from the original data —
+      // simpler and more correct than trying to reconstruct opts from node data,
+      // and cheap because Cytoscape reuses layout when we skip .layout().run().
       Object.keys(CARD_CACHE).forEach(k => delete CARD_CACHE[k]);
-      Object.values(instances).forEach(cy => {
+      TABS.forEach(tab => {
+        const cy = instances[tab.id];
+        if (!cy) return;
         cy.batch(() => {
-          cy.nodes('[?svgCard]').forEach(node => {
-            const service = node.data('service');
-            const resLabel = node.data('resourceLabel');
-            const stateName = node.id();
-            if (service) {
-              const cacheKey = `${service}|${stateName}|${light ? 'l' : 'd'}`;
-              if (!CARD_CACHE[cacheKey]) {
-                CARD_CACHE[cacheKey] = buildServiceCard(service, resLabel, stateName, light);
-              }
-              node.data('svgCard', CARD_CACHE[cacheKey]);
-              node.data('border', SERVICE_ACCENT[service] || '#4a9de8');
+          buildElements(tab.data, light).forEach(el => {
+            const node = cy.getElementById(el.data.id);
+            if (node.nonempty() && el.data.svgCard) {
+              node.data('svgCard', el.data.svgCard);
+              node.data('cardW', el.data.cardW);
+              node.data('cardH', el.data.cardH);
+              node.data('border', el.data.border);
             }
           });
         });
       });
     }
+
+    // ── Catalog view: renders one preview card per state kind + AWS service ─
+    // Lazy-built the first time the user clicks the ▦ Catalog button, then
+    // cached in the DOM. Reuses buildServiceCard() so the catalog can never
+    // drift out of sync with the actual graph rendering.
+    const catalog = document.getElementById('catalog');
+    const btnCatalog = document.getElementById('btn-catalog');
+    let catalogBuilt = false;
+    function buildCatalog() {
+      const cardImg = (opts, label) => {
+        const c = buildServiceCard(opts);
+        return '<div class="cat-item" title="' + label + '"><img src="' + c.uri + '" alt="' + label + '" width="' + c.cardW + '" height="' + c.cardH + '"/></div>';
+      };
+      const services = Object.keys(SERVICE_GRADIENT).filter(k => !k.startsWith('__'));
+      const flowStates = [
+        ['__succeed__', 'Succeed', {}],
+        ['__fail__',    'Fail',    { failError: 'BadInput' }],
+        ['__pass__',    'Pass',    {}],
+        ['__wait__',    'Wait',    {}],
+        ['__choice__',  'Choice',  {}],
+        ['__map__',     'Map',     { mapConcurrency: 5 }],
+        ['__parallel__','Parallel',{ parallelBranches: 3 }],
+      ];
+      const badgeStates = [
+        ['lambda',   'Retry',            { hasRetry: true, retryCount: 3 }],
+        ['sns',      'waitForTaskToken', { isWaitForToken: true }],
+        ['__map__',  'Distributed Map',  { mapConcurrency: 0, isDistributedMap: true }],
+      ];
+      let html = '<div class="cat-section">Service Task Cards</div><div class="cat-grid">';
+      for (const svc of services) {
+        html += cardImg({ service: svc, stateName: svc[0].toUpperCase() + svc.slice(1), isLight: false }, svc);
+      }
+      html += '</div><div class="cat-section">Flow Control States</div><div class="cat-grid">';
+      for (const [svc, name, extra] of flowStates) {
+        html += cardImg(Object.assign({ service: svc, stateName: name, isLight: false }, extra), name);
+      }
+      html += '</div><div class="cat-section">Badge Variants</div><div class="cat-grid">';
+      for (const [svc, name, extra] of badgeStates) {
+        html += cardImg(Object.assign({ service: svc, stateName: name, isLight: false }, extra), name);
+      }
+      html += '</div>';
+      catalog.innerHTML = html;
+      catalogBuilt = true;
+    }
+    function setCatalog(visible) {
+      if (visible && !catalogBuilt) buildCatalog();
+      catalog.classList.toggle('active', visible);
+      btnCatalog.classList.toggle('active', visible);
+      // Hide the graph panes while catalog is up so they don't ghost through
+      // the catalog scroll area; unset the inline style when we go back to the
+      // graph so the `.graph-pane.active` CSS rule regains control.
+      document.querySelectorAll('.graph-pane').forEach(p => {
+        p.style.visibility = visible ? 'hidden' : '';
+      });
+      if (!visible) {
+        requestAnimationFrame(() => {
+          const cy = instances[activeTabId];
+          if (cy) { cy.resize(); cy.fit(undefined, 40); }
+        });
+      }
+    }
+    btnCatalog.addEventListener('click', () => {
+      setCatalog(!catalog.classList.contains('active'));
+    });
 
     // ── Legend toggle ─────────────────────────────────────────────────────
     const legend    = document.getElementById('legend');
@@ -583,6 +967,12 @@
     function setLegend(visible) {
       legend.classList.toggle('hidden', !visible);
       btnLegend.classList.toggle('active', visible);
+      // The sidebar shares a flex row with the graph — resize Cytoscape so it
+      // repaints into the new space and refits the graph.
+      requestAnimationFrame(() => {
+        const cy = instances[activeTabId];
+        if (cy) { cy.resize(); cy.fit(undefined, 40); }
+      });
     }
     btnLegend.addEventListener('click', () => setLegend(legend.classList.contains('hidden')));
     document.getElementById('legend-close').addEventListener('click', () => setLegend(false));
@@ -590,6 +980,33 @@
     document.getElementById('btn-back').addEventListener('click', () => switchTab('main'));
     document.getElementById('btn-fit').addEventListener('click', () => {
       instances[activeTabId]?.fit(undefined, 40);
+    });
+
+    // Zoom buttons: step-zoom around the current viewport centre so the user
+    // sees the same region larger/smaller instead of jumping back to the origin.
+    function stepZoom(factor) {
+      const cy = instances[activeTabId];
+      if (!cy) return;
+      const container = cy.container();
+      if (!container) return;
+      const rect = container.getBoundingClientRect();
+      cy.zoom({
+        level:    cy.zoom() * factor,
+        renderedPosition: { x: rect.width / 2, y: rect.height / 2 },
+      });
+    }
+    document.getElementById('btn-zoom-in').addEventListener('click', () => stepZoom(1.25));
+    document.getElementById('btn-zoom-out').addEventListener('click', () => stepZoom(0.8));
+    // Keyboard shortcuts: Cmd/Ctrl + = / - / 0 zoom, Escape clears the highlight
+    window.addEventListener('keydown', e => {
+      if (e.key === 'Escape') {
+        Object.values(instances).forEach(cy => cy.nodes().removeClass('highlighted'));
+        return;
+      }
+      if (!(e.metaKey || e.ctrlKey)) return;
+      if (e.key === '=' || e.key === '+') { e.preventDefault(); stepZoom(1.25); }
+      else if (e.key === '-' || e.key === '_') { e.preventDefault(); stepZoom(0.8); }
+      else if (e.key === '0') { e.preventDefault(); instances[activeTabId]?.fit(undefined, 40); }
     });
 
     // ── Theme toggle ──────────────────────────────────────────────────────

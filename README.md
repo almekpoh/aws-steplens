@@ -13,29 +13,32 @@ Supports **YAML** (Serverless Framework), raw **JSON**, and **JSONata** query la
 
 Open a live graph of your state machine with a single click on the ⊤ toolbar icon.
 
-- **Color-coded nodes** by state type (Task, Choice, Wait, Parallel, Map, Succeed, Fail…)
-- **State count badge** on every tab — see at a glance how many states each graph contains
-- **Click** any node → jumps to the matching line in the editor
-- **Move the cursor** in the editor → the corresponding node is highlighted orange in the graph
-- **Double-click** a Parallel or Map node → opens its sub-graph in a dedicated tab (works at any nesting depth)
-- **← Main** back button appears automatically when browsing a sub-graph
-- **⊡ Fit** button recenters the graph at any time
-- **Export** the current view as PNG or JPEG
-- **☰ Legend** toggle button in the toolbar — hide or show the legend panel; `×` button on the panel itself also closes it
+- **Gradient service cards** on every state — 36 official AWS icons (Lambda, DynamoDB, S3, SNS, Bedrock, Step Functions, …), coloured left panel matching the AWS brand palette, state name + service subtitle + meta line.
+- **Every state kind gets its own card style** — Task (per-service gradient), Fail (red + ⚠ Catch), Succeed (green ✓), Pass (grey arrow), Wait (teal clock), Choice (amber diamond), Map (green dashed + iterator glyph), Parallel (indigo dashed + branch glyph).
+- **Corner pill badges** surface metadata at a glance: `↺ Retry: N`, `×N` (Map concurrency, `×∞` for unlimited), `‖N` (Parallel branches), `⏱ waitForTaskToken`.
+- **State count badge** on every tab — see how many states each graph contains at a glance.
+- **Click** any node → jumps to the matching line in the editor.
+- **Move the cursor** in the editor → the corresponding node lights up with a golden halo.
+- **Escape** clears the current highlight; **Cmd/Ctrl + −/+/0** zoom / fit.
+- **Double-click** a Parallel or Map card → opens its sub-graph in a dedicated tab (works at any nesting depth).
+- **← Main** back button appears automatically when browsing a sub-graph.
+- **⊡ Fit / − / +** buttons recenter or step-zoom the graph.
+- **▦ Catalog** button opens a full-page overlay showing every card variant (one per AWS service + one per flow-control state + badge variants). Useful for exploring what the extension can render.
+- **Export** the current view as PNG or JPEG.
+- **Design Reference sidebar** (right, 270 px) — gradient swatches per service family, badge legend, edge-type legend. Toggle via the `☰ Legend` button.
 
-### Node annotations
+### Node annotations (badge overlay)
 
-| Annotation | Meaning |
-|------------|---------|
-| `↺` in label | State has a `Retry` block configured |
-| `×N` in label | Map state with `MaxConcurrency: N` (`×∞` if 0 = unlimited) |
-| `‖N` in label | Parallel state with N branches |
-| `⊕` in label | Distributed Map (`ItemProcessor.ProcessorConfig.Mode: DISTRIBUTED`) |
-| `⏸` in label | Task using `.waitForTaskToken` (waits for external callback) |
-| `🌐` in label | HTTP Task (`states:::http:invoke`) |
-| second line in Fail label | `Error` value (or `Cause` if `Error` is absent) — shown directly on the node |
-| Purple dashed border | Parallel / Map — double-click to explore the sub-graph |
-| Orange highlight | State at cursor position |
+| Badge | Meaning |
+|-------|---------|
+| `↺ Retry: N` (grey pill) | State has a `Retry` block with N attempts |
+| `×N` (green pill) | Map state with `MaxConcurrency: N` (`×∞` if 0 = unlimited) |
+| `‖N` (indigo pill) | Parallel state with N branches |
+| `⏱ waitForTaskToken` (amber pill) | Task using `.waitForTaskToken` (waits for external callback) |
+| Green dashed border + "Map iterator" meta | Map state — double-click to explore the sub-graph |
+| Indigo dashed border + "Parallel branch" meta | Parallel state — double-click to explore the sub-graph |
+| Red card + `⚠ Catch · <Error>` subtitle | Fail state with declared Error/Cause |
+| Golden halo around the card | State at cursor position |
 | Red dashed border + `(not found)` | Broken reference — a `Next`, `Default`, `Catch`, or `Choices` target that does not exist in `States` |
 
 ### Language features
@@ -145,6 +148,8 @@ You can also run StepLens commands from the **Command Palette** (`⇧⌘P` on ma
 ---
 
 ## Supported formats
+
+StepLens tolerates the **CloudFormation intrinsic tags** (`!GetAtt`, `!Ref`, `!Sub`, `!Join`, `!If`, `!Split`, `!Select`, `!Base64`, `!ImportValue`, and more) that Serverless Framework / SAM templates sprinkle around ASL definitions. They're registered as custom YAML tags so parsing stays silent — no `TAG_RESOLVE_FAILED` noise in the dev console.
 
 ### Raw ASL (JSON)
 

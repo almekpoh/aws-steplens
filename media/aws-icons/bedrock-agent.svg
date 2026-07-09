@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="80px" height="80px" viewBox="0 0 80 80" version="1.1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+    <title>Icon-Architecture/64/Arch_Amazon-Bedrock_64</title>
+    <desc>Amazon Bedrock — three interconnected foundation-model nodes.</desc>
+    <defs>
+        <linearGradient x1="0%" y1="100%" x2="100%" y2="0%" id="linearGradient-1">
+            <stop stop-color="#055F4E" offset="0%"></stop>
+            <stop stop-color="#56C0A7" offset="100%"></stop>
+        </linearGradient>
+    </defs>
+    <g id="Icon-Architecture/64/Arch_Amazon-Bedrock_64" stroke="none" stroke-width="1" fill="none" fill-rule="evenodd">
+        <g id="Icon-Architecture-BG/64/Machine-Learning" fill="url(#linearGradient-1)">
+            <rect id="Rectangle" x="0" y="0" width="80" height="80"></rect>
+        </g>
+        <g id="Icon-Service/64/Amazon-Bedrock_64" fill="#FFFFFF" fill-rule="nonzero">
+            <path d="M40,14 C41.657,14 43,15.343 43,17 C43,18.306 42.166,19.418 41,19.829 L41,32.083 L52.34,38.585 L56.219,36.339 C56.079,35.921 56,35.47 56,35 C56,32.79 57.79,31 60,31 C62.21,31 64,32.79 64,35 C64,37.21 62.21,39 60,39 C59.184,39 58.427,38.751 57.795,38.328 L54.34,40.328 L54.34,54.674 L57.797,56.678 C58.429,56.253 59.185,56 60,56 C62.21,56 64,57.79 64,60 C64,62.21 62.21,64 60,64 C57.79,64 56,62.21 56,60 C56,59.532 56.079,59.082 56.219,58.663 L52.34,56.415 L41,62.917 L41,66.171 C42.166,66.582 43,67.694 43,69 C43,68.657 41.657,70 40,70 C38.343,70 37,68.657 37,67 C37,65.694 37.834,64.582 39,64.171 L39,62.917 L27.66,56.415 L23.781,58.663 C23.921,59.082 24,59.532 24,60 C24,62.21 22.21,64 20,64 C17.79,64 16,62.21 16,60 C16,57.79 17.79,56 20,56 C20.815,56 21.571,56.253 22.203,56.678 L25.66,54.674 L25.66,40.328 L22.205,38.328 C21.573,38.751 20.816,39 20,39 C17.79,39 16,37.21 16,35 C16,32.79 17.79,31 20,31 C22.21,31 24,32.79 24,35 C24,35.47 23.921,35.921 23.781,36.339 L27.66,38.585 L39,32.083 L39,19.829 C37.834,19.418 37,18.306 37,17 C37,15.343 38.343,14 40,14 Z M40,34.114 L28.674,40.611 L28.674,53.389 L40,59.886 L51.326,53.389 L51.326,40.611 L40,34.114 Z"></path>
+        </g>
+    </g>
+</svg>

@@ -142,6 +142,43 @@ States:
     assert.ok(r);
     assert.strictEqual(r.definition.States['A'].Resource, 'arn:aws-us-gov:states:::lambda:invoke');
   });
+
+  it('parses Serverless Framework file with CloudFormation intrinsic tags (!GetAtt, !Ref, !Sub, !Join)', () => {
+    // Regression: yaml.parse used to spray TAG_RESOLVE_FAILED warnings for
+    // every CFN intrinsic in the wrapping template. Verify we can now parse
+    // a realistic serverless.yml that mixes ASL + CFN tags silently.
+    const capturedLogs: string[] = [];
+    const origWarn = console.warn;
+    const origError = console.error;
+    console.warn = (...args: unknown[]) => { capturedLogs.push('warn:' + String(args[0])); };
+    console.error = (...args: unknown[]) => { capturedLogs.push('error:' + String(args[0])); };
+    try {
+      const yaml = `
+role: !GetAtt SfPrepareImageBatchLogGroup.Arn
+name: !Sub \${self:service}-\${self:provider.stage}
+tags:
+  Env: !Ref Stage
+  LogGroup: !Join ['-', [!Ref AWS::StackName, 'logs']]
+definition:
+  StartAt: PrepareImage
+  States:
+    PrepareImage:
+      Type: Task
+      Resource: !GetAtt PrepareImageLambda.Arn
+      End: true
+`;
+      const r = AslParser.parse(yaml, 'yaml');
+      assert.ok(r, 'should parse the wrapped ASL');
+      assert.strictEqual(r.isWrapped, true);
+      assert.strictEqual(r.definition.StartAt, 'PrepareImage');
+      assert.ok(r.definition.States['PrepareImage'], 'PrepareImage state should be extracted');
+    } finally {
+      console.warn = origWarn;
+      console.error = origError;
+    }
+    const tagWarnings = capturedLogs.filter(l => l.includes('TAG_RESOLVE_FAILED'));
+    assert.deepStrictEqual(tagWarnings, [], 'no TAG_RESOLVE_FAILED warnings should be emitted');
+  });
 });
 
 // ── reachableStates() ────────────────────────────────────────────────────────
@@ -178,14 +215,14 @@ describe('AslParser.toGraphData()', () => {
     assert.ok(g.nodes.find(n => n.id === '__END__'));
   });
 
-  it('annotates Map node with ×N', () => {
+  it('exposes MaxConcurrency on Map node', () => {
     const def = AslParser.parse(MAP_YAML, 'yaml')!.definition;
     const g = AslParser.toGraphData(def);
     const m = g.nodes.find(n => n.id === 'M')!;
-    assert.ok(m.label.includes('×5'), `label was: ${m.label}`);
+    assert.strictEqual(m.mapConcurrency, 5);
   });
 
-  it('annotates Map node with ×∞ when MaxConcurrency is 0', () => {
+  it('exposes MaxConcurrency = 0 (unlimited) on Map node', () => {
     const yaml = `
 StartAt: M
 States:
@@ -200,17 +237,17 @@ States:
 `;
     const def = AslParser.parse(yaml, 'yaml')!.definition;
     const g = AslParser.toGraphData(def);
-    assert.ok(g.nodes.find(n => n.id === 'M')!.label.includes('×∞'));
+    assert.strictEqual(g.nodes.find(n => n.id === 'M')!.mapConcurrency, 0);
   });
 
-  it('annotates Parallel node with ‖N', () => {
+  it('exposes branch count on Parallel node', () => {
     const def = AslParser.parse(PARALLEL_YAML, 'yaml')!.definition;
     const g = AslParser.toGraphData(def);
     const p = g.nodes.find(n => n.id === 'Par')!;
-    assert.ok(p.label.includes('‖2'), `label was: ${p.label}`);
+    assert.strictEqual(p.parallelBranches, 2);
   });
 
-  it('annotates Task with ↺ when Retry is set', () => {
+  it('exposes retryCount on Task when Retry is set', () => {
     const yaml = `
 StartAt: T
 States:
@@ -223,10 +260,12 @@ States:
 `;
     const def = AslParser.parse(yaml, 'yaml')!.definition;
     const g = AslParser.toGraphData(def);
-    assert.ok(g.nodes.find(n => n.id === 'T')!.label.includes('↺'));
+    const t = g.nodes.find(n => n.id === 'T')!;
+    assert.strictEqual(t.hasRetry, true);
+    assert.strictEqual(t.retryCount, 1);
   });
 
-  it('annotates waitForTaskToken with ⏸', () => {
+  it('flags waitForTaskToken tasks', () => {
     const yaml = `
 StartAt: T
 States:
@@ -237,10 +276,10 @@ States:
 `;
     const def = AslParser.parse(yaml, 'yaml')!.definition;
     const g = AslParser.toGraphData(def);
-    assert.ok(g.nodes.find(n => n.id === 'T')!.label.includes('⏸'));
+    assert.strictEqual(g.nodes.find(n => n.id === 'T')!.isWaitForToken, true);
   });
 
-  it('annotates HTTP Task with 🌐', () => {
+  it('flags HTTP tasks', () => {
     const yaml = `
 StartAt: T
 States:
@@ -251,10 +290,10 @@ States:
 `;
     const def = AslParser.parse(yaml, 'yaml')!.definition;
     const g = AslParser.toGraphData(def);
-    assert.ok(g.nodes.find(n => n.id === 'T')!.label.includes('🌐'));
+    assert.strictEqual(g.nodes.find(n => n.id === 'T')!.isHttpTask, true);
   });
 
-  it('annotates distributed Map with ⊕', () => {
+  it('flags distributed Map', () => {
     const yaml = `
 StartAt: M
 States:
@@ -271,7 +310,17 @@ States:
 `;
     const def = AslParser.parse(yaml, 'yaml')!.definition;
     const g = AslParser.toGraphData(def);
-    assert.ok(g.nodes.find(n => n.id === 'M')!.label.includes('⊕'));
+    assert.strictEqual(g.nodes.find(n => n.id === 'M')!.isDistributedMap, true);
+  });
+
+  it('exposes failError on Fail node', () => {
+    const g = AslParser.toGraphData({
+      StartAt: 'F',
+      States: {
+        F: { Type: 'Fail', Error: 'MyError', Cause: 'boom' },
+      },
+    });
+    assert.strictEqual(g.nodes.find(n => n.id === 'F')!.failError, 'MyError');
   });
 
   it('creates __END__ node when only Fail state exists (no explicit End: true)', () => {
@@ -318,22 +367,22 @@ States:
     assert.ok(g.edges.find(e => e.source === 'S' && e.target === '__END__'), 'Succeed → __END__ edge missing');
   });
 
-  it('shows Error in Fail node label', () => {
+  it('exposes Error as failError on Fail node', () => {
     const g = AslParser.toGraphData({
       StartAt: 'F',
       States: { F: { Type: 'Fail', Error: 'OrderNotFound', Cause: 'No such order' } },
     });
     const node = g.nodes.find(n => n.id === 'F')!;
-    assert.ok(node.label.includes('OrderNotFound'), `label was: ${node.label}`);
+    assert.strictEqual(node.failError, 'OrderNotFound');
   });
 
-  it('falls back to Cause in Fail node label when Error is absent', () => {
+  it('falls back to Cause as failError when Error is absent', () => {
     const g = AslParser.toGraphData({
       StartAt: 'F',
       States: { F: { Type: 'Fail', Cause: 'Something exploded' } },
     });
     const node = g.nodes.find(n => n.id === 'F')!;
-    assert.ok(node.label.includes('Something exploded'), `label was: ${node.label}`);
+    assert.strictEqual(node.failError, 'Something exploded');
   });
 
   it('creates a ghost node and start edge when StartAt is not in States', () => {

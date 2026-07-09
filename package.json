@@ -2,7 +2,7 @@
   "name": "aws-steplens",
   "displayName": "AWS StepLens",
   "description": "Visualize, navigate and lint AWS Step Functions definitions (ASL YAML/JSON + JSONata). Interactive graph preview, real-time linter with 50+ rules, nested Parallel/Map sub-graph exploration, and PNG/JPEG export.",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "galleryBanner": {
     "color": "#1a1a2e",
     "theme": "dark"
@@ -112,14 +112,14 @@
   "scripts": {
     "vscode:prepublish": "npm run build",
     "build": "npm run copy-icons && npm run bundle && npm run bundle:webview",
-    "package": "vsce package",
+    "package": "npm run build && (command -v vsce >/dev/null && vsce package || npx @vscode/vsce package)",
     "copy-icons": "node scripts/copy-icons.js",
     "bundle": "esbuild src/extension.ts --bundle --outfile=dist/extension.js --external:vscode --format=cjs --platform=node --minify",
     "bundle:webview": "esbuild webview/vendor-entry.js --bundle --outfile=webview/vendor.js --platform=browser --minify",
     "compile": "tsc -p ./",
     "watch": "esbuild src/extension.ts --bundle --outfile=dist/extension.js --external:vscode --format=cjs --platform=node --sourcemap --watch",
     "lint": "eslint src --ext ts",
-    "test": "node --require ts-node/register --require ./test/setup.ts --test test/aslParser.test.ts test/linter.test.ts"
+    "test": "npm run compile && node --require ./out/test/setup.js --test out/test/aslParser.test.js out/test/linter.test.js out/test/webviewCards.test.js"
   },
   "devDependencies": {
     "@types/node": "^20.0.0",

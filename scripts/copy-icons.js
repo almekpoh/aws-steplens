@@ -58,7 +58,17 @@ fs.mkdirSync(OUT_DIR, { recursive: true });
 let copied  = 0;
 let skipped = 0;
 
+// Icons NOT in the upstream `aws-svg-icons` package (mostly services released
+// after 2021-07-30) that we ship as hand-authored SVGs. `copy-icons.js` must
+// never overwrite these — they don't exist in the source at all.
+const HAND_AUTHORED = new Set([
+  'bedrock',       // Amazon Bedrock (GA 2023)
+  'bedrock-agent', // Bedrock Agents (2024)
+]);
+
 for (const [service, relPath] of Object.entries(ICON_MAP)) {
+  if (HAND_AUTHORED.has(service)) continue;
+
   const src  = path.join(SRC_BASE, relPath);
   const dest = path.join(OUT_DIR, `${service}.svg`);
 
@@ -72,4 +82,4 @@ for (const [service, relPath] of Object.entries(ICON_MAP)) {
   copied++;
 }
 
-console.log(`[copy-icons] Done — ${copied} icon(s) copied to media/aws-icons/, ${skipped} skipped.`);
+console.log(`[copy-icons] Done — ${copied} icon(s) copied to media/aws-icons/, ${skipped} skipped, ${HAND_AUTHORED.size} hand-authored icons preserved.`);
