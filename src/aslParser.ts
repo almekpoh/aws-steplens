@@ -1,5 +1,36 @@
 import * as yaml from 'yaml';
 
+/**
+ * CloudFormation intrinsic function tags — used in Serverless Framework and
+ * SAM templates that wrap Step Functions ASL. These are not part of standard
+ * YAML, so `yaml.parse(text)` warns "TAG_RESOLVE_FAILED" for each occurrence
+ * even though our ASL walk never inspects those values. Registering the tag
+ * set makes the parser accept them silently and return the raw payload
+ * (which we don't consume).
+ *
+ * Reference: https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/intrinsic-function-reference.html
+ */
+const CFN_INTRINSIC_TAGS: yaml.Tags = [
+  // Scalar-form intrinsics: `!Ref MyResource`, `!GetAtt Res.Arn`, `!Sub "abc"`
+  ...['!Ref', '!GetAtt', '!Sub', '!ImportValue', '!Base64', '!GetAZs',
+      '!Condition', '!Transform', '!ToJsonString'].map(tag =>
+    ({ tag, resolve: (str: string) => str } as yaml.ScalarTag)),
+  // Sequence-form intrinsics: `!Join [":", [a, b]]`, `!GetAtt [R, Arn]`, etc.
+  ...['!Join', '!Split', '!Select', '!FindInMap', '!Cidr', '!Sub',
+      '!GetAtt', '!If', '!And', '!Or', '!Not', '!Equals', '!ForEach',
+      '!Length'].map(tag =>
+    ({ tag, collection: 'seq' as const, resolve: (seq: unknown) => seq } as unknown as yaml.CollectionTag)),
+];
+
+/** Silent, CFN-aware YAML parser used everywhere in the extension. */
+function parseYaml(text: string): unknown {
+  return yaml.parse(text, {
+    customTags: CFN_INTRINSIC_TAGS,
+    // Never log to console — we don't want CFN template noise in the user's dev tools
+    logLevel: 'silent',
+  });
+}
+
 export interface AslCatchClause {
   ErrorEquals: string[];
   Next: string;
@@ -118,12 +149,19 @@ export interface ParsedSfn {
 
 export interface GraphNode {
   id: string;
-  label: string;  // display label — may include ↺ / ×N / ‖N / ⏸ / ⊕ suffixes
+  label: string;  // pure state name — badge metadata lives in structured fields below
   type: string;   // Task | Choice | Wait | Pass | Succeed | Fail | Parallel | Map | START | END
   hasRetry?: boolean;
+  retryCount?: number;         // number of Retry entries — used to render "↺ Retry: N" badge
   isWaitForToken?: boolean;
   isDistributedMap?: boolean;
   isHttpTask?: boolean;
+  service?: string;            // 'lambda' | 'sns' | 'dynamodb' | 'bedrock' | etc.
+  serviceAction?: string;      // 'Invoke' | 'Publish' | 'PutItem' | etc.
+  resourceLabel?: string;      // 'AWS Lambda: Invoke' — shown as subtitle in card
+  mapConcurrency?: number;     // Map only. 0 = unlimited (∞). undefined = no badge.
+  parallelBranches?: number;   // Parallel only. undefined = no badge.
+  failError?: string;          // Fail only. Error (or Cause if no Error) shown in card subtitle.
 }
 
 export interface GraphEdge {
@@ -147,6 +185,97 @@ export interface SubGraph {
   data: GraphData;
 }
 
+/** Official display names for Step Functions SDK integration services */
+const SERVICE_DISPLAY_NAMES: Record<string, string> = {
+  'lambda':           'AWS Lambda',
+  'states':           'AWS Step Functions',
+  'ecs':              'Amazon ECS',
+  'fargate':          'AWS Fargate',
+  'batch':            'AWS Batch',
+  'dynamodb':         'Amazon DynamoDB',
+  's3':               'Amazon S3',
+  'athena':           'Amazon Athena',
+  'glue':             'AWS Glue',
+  'databrew':         'AWS Glue DataBrew',
+  'kinesis':          'Amazon Kinesis',
+  'firehose':         'Amazon Kinesis Firehose',
+  'elasticmapreduce': 'Amazon EMR',
+  'emr-containers':   'Amazon EMR on EKS',
+  'emr-serverless':   'Amazon EMR Serverless',
+  'appsync':          'AWS AppSync',
+  'apigateway':       'Amazon API Gateway',
+  'events':           'Amazon EventBridge',
+  'eventbridge':      'Amazon EventBridge',
+  'scheduler':        'Amazon EventBridge Scheduler',
+  'sns':              'Amazon SNS',
+  'sqs':              'Amazon SQS',
+  'sagemaker':        'Amazon SageMaker',
+  'comprehend':       'Amazon Comprehend',
+  'rekognition':      'Amazon Rekognition',
+  'textract':         'Amazon Textract',
+  'translate':        'Amazon Translate',
+  'polly':            'Amazon Polly',
+  'transcribe':       'Amazon Transcribe',
+  'lex':              'Amazon Lex',
+  'cloudformation':   'AWS CloudFormation',
+  'ssm':              'AWS Systems Manager',
+  'secretsmanager':   'AWS Secrets Manager',
+  'mediaconvert':     'AWS Elemental MediaConvert',
+  'iot':              'AWS IoT',
+  'codebuild':        'AWS CodeBuild',
+  'bedrock':          'Amazon Bedrock',
+  'bedrock-agent':    'Amazon Bedrock Agent',
+  'http':             'HTTP',
+};
+
+/** Convert camelCase or lowercase to PascalCase — e.g. invokeModel → InvokeModel */
+function toPascalCase(s: string): string {
+  if (!s) return s;
+  return s.charAt(0).toUpperCase() + s.slice(1);
+}
+
+/**
+ * Extract service identifier, action and display label from a Step Functions Resource ARN.
+ * Returns empty object for non-Task states or unrecognised ARN formats.
+ */
+function detectService(resource: string | undefined): {
+  service?: string;
+  serviceAction?: string;
+  resourceLabel?: string;
+} {
+  if (!resource) return {};
+
+  // Pattern: arn:*:states:::aws-sdk:SERVICE:ACTION[.PATTERN]
+  const awsSdkMatch = resource.match(/arn:[^:]*:states:::aws-sdk:([^:.]+):([^.]+)/);
+  if (awsSdkMatch) {
+    const service = awsSdkMatch[1].toLowerCase();
+    const action  = toPascalCase(awsSdkMatch[2]);
+    const display = SERVICE_DISPLAY_NAMES[service] ?? service;
+    return { service, serviceAction: action, resourceLabel: `${display}: ${action}` };
+  }
+
+  // Pattern: arn:*:states:::SERVICE:ACTION[.PATTERN]
+  const sdkMatch = resource.match(/arn:[^:]*:states:::([^:.]+):([^.]+)/);
+  if (sdkMatch) {
+    const service = sdkMatch[1].toLowerCase();
+    const action  = toPascalCase(sdkMatch[2]);
+    const display = SERVICE_DISPLAY_NAMES[service] ?? service;
+    return { service, serviceAction: action, resourceLabel: `${display}: ${action}` };
+  }
+
+  // Pattern: direct Lambda ARN — arn:aws:lambda:REGION:ACCOUNT:function:NAME
+  if (/arn:[^:]*:lambda:/.test(resource)) {
+    return { service: 'lambda', serviceAction: 'Invoke', resourceLabel: 'AWS Lambda: Invoke' };
+  }
+
+  // Pattern: nested Step Functions — arn:aws:states:REGION:ACCOUNT:stateMachine:NAME
+  if (/arn:[^:]*:states:[^:]+:[^:]+:stateMachine:/.test(resource)) {
+    return { service: 'states', serviceAction: 'StartExecution', resourceLabel: 'AWS Step Functions: StartExecution' };
+  }
+
+  return {};
+}
+
 export class AslParser {
   /**
    * If the document is a SAM/CloudFormation template that uses
@@ -159,7 +288,7 @@ export class AslParser {
    */
   static extractDefinitionUri(text: string, languageId: string): string | null {
     try {
-      const raw = languageId === 'json' ? JSON.parse(text) : yaml.parse(text);
+      const raw = languageId === 'json' ? JSON.parse(text) : parseYaml(text);
       if (!raw?.Resources || typeof raw.Resources !== 'object') return null;
 
       for (const resource of Object.values(raw.Resources as Record<string, unknown>)) {
@@ -226,7 +355,7 @@ export class AslParser {
     try {
       const raw = languageId === 'json'
         ? JSON.parse(text)
-        : yaml.parse(text);
+        : parseYaml(text);
 
       if (!raw || typeof raw !== 'object') return null;
 
@@ -379,41 +508,34 @@ export class AslParser {
     nodes.push({ id: '__START__', label: 'Start', type: 'START' });
 
     for (const [name, state] of Object.entries(def.States)) {
-      let label = name;
       const resourceStr = typeof state.Resource === 'string' ? state.Resource : '';
       const isWaitForToken = resourceStr.includes('waitForTaskToken');
       const isHttpTask = resourceStr.includes('states:::http:invoke');
       const isDistributedMap = state.Type === 'Map' &&
         (state.ItemProcessor as AslItemProcessor | undefined)?.ProcessorConfig?.Mode === 'DISTRIBUTED';
 
-      if (state.Type === 'Map') {
-        if (isDistributedMap) {
-          label += ' ⊕';
-        }
-        if (state.MaxConcurrency !== undefined) {
-          label += state.MaxConcurrency === 0 ? ' ×∞' : ` ×${state.MaxConcurrency}`;
-        }
-      }
-      if (state.Type === 'Parallel' && state.Branches?.length) {
-        label += ` ‖${state.Branches.length}`;
-      }
-      if ((state.Retry?.length ?? 0) > 0) label += ' ↺';
-      if (isWaitForToken) label += ' ⏸';
-      if (isHttpTask) label += ' 🌐';
-      // Fail: append Error (or Cause if no Error) as a second line
-      if (state.Type === 'Fail') {
-        const detail = state.Error ?? state.Cause;
-        if (detail) label += `\n${detail}`;
-      }
+      const retryCount = state.Retry?.length ?? 0;
+      const mapConcurrency = state.Type === 'Map' ? state.MaxConcurrency : undefined;
+      const parallelBranches = state.Type === 'Parallel' ? state.Branches?.length : undefined;
+      const failError = state.Type === 'Fail' ? (state.Error ?? state.Cause) : undefined;
+
+      const serviceInfo = state.Type === 'Task' || state.Type === undefined
+        ? detectService(resourceStr)
+        : {};
 
       nodes.push({
         id: name,
-        label,
+        label: name,
         type: state.Type ?? 'Task',
-        hasRetry: (state.Retry?.length ?? 0) > 0,
+        hasRetry: retryCount > 0,
+        retryCount: retryCount > 0 ? retryCount : undefined,
         isWaitForToken,
         isDistributedMap,
         isHttpTask,
+        mapConcurrency,
+        parallelBranches,
+        failError,
+        ...serviceInfo,
       });
     }
 

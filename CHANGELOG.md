@@ -2,6 +2,82 @@
 
 ---
 
+## [0.4.1] — 2026-07-09
+
+Consolidation release: complete graph-preview redesign around the AWS design language, plus a lot of fixes uncovered while getting the new UI to render correctly.
+
+### Added
+
+**Graph preview — full card system**
+
+- **Every state kind now renders as a gradient card.** Task (per-service AWS gradient), Fail (red + ⚠ Catch subtitle), Succeed (green ✓), Pass (grey arrow), Wait (teal clock), Choice (amber diamond+cross), Map (green dashed + iterator glyph), Parallel (indigo dashed + branch glyph). START / END stay as small circles per ASL convention.
+- **Corner pill badges** surface state metadata without cluttering the card title: `↺ Retry: N`, `×N` / `×∞` (Map concurrency), `‖N` (Parallel branches), `⏱ waitForTaskToken`, and Distributed Map indicator.
+- **Hand-authored AWS Bedrock icon** (`bedrock.svg` + `bedrock-agent.svg`) — the upstream `aws-svg-icons` package (2021-07-30) predates Bedrock's launch. `scripts/copy-icons.js` now preserves hand-authored icons via a `HAND_AUTHORED` set, so `npm run build` never overwrites them.
+
+**Design Reference sidebar**
+
+- The floating legend is now a fixed 270 px right sidebar matching the design mockup. Sections: States (gradient swatches per family), Badges (pill variants), Transitions. The `☰ Legend` button toggles the sidebar and refits Cytoscape into the freed space.
+
+**Catalog view**
+
+- New `▦ Catalog` button opens a full-page overlay listing every card variant — one per AWS service, one per flow-control state, plus badge variants (Retry, waitForTaskToken, Distributed Map). Reuses `buildServiceCard()` directly, so the catalog can never drift out of sync with the graph.
+
+**Zoom controls**
+
+- `−` / `+` / `⊡ Fit` buttons and keyboard shortcuts (`Cmd/Ctrl` + `-` / `=` / `0`).
+- `Escape` clears the highlighted state.
+- `maxZoom` raised 3× → 5×, `minZoom` lowered 0.15 → 0.1 for very large graphs.
+
+**Layout breathing room**
+
+- Dagre `nodeSep` 60 → 90 px, `rankSep` 90 → 130 px, `edgeSep` 20 → 24 px so highlight halos don't overlap neighbouring cards.
+
+**CloudFormation intrinsic tag support**
+
+- `!GetAtt`, `!Ref`, `!Sub`, `!Join`, `!Split`, `!Select`, `!Base64`, `!ImportValue`, `!If`, `!And`, `!Or`, `!Not`, `!Equals`, `!Cidr`, `!GetAZs`, `!Condition`, `!Transform`, `!ToJsonString`, `!ForEach`, `!Length` are now registered as custom YAML tags. `serverless.yml` / SAM templates parse silently instead of spraying `TAG_RESOLVE_FAILED` warnings in the dev console.
+
+### Fixed
+
+- **Black-screen bug (root cause).** `.replace('{{NONCE}}', v)` (string overload) in `preview.ts` only replaced the first occurrence, leaving the main `<script>` tag with a literal `nonce="{{NONCE}}"` that VS Code's CSP rejected. All template placeholders now use global regex substitution. A regression test asserts no `{{...}}` placeholder ever survives rendering.
+- **Icons no longer masked by their own coloured background.** AWS Architecture SVGs ship with an 80×80 gradient rect on top of the glyph; it's stripped at load-time via a regex that catches both the `Icon-Architecture-BG` and plain `Rectangle` variants used across icon revisions.
+- **Highlight fallback on plain shapes.** The `node.highlighted:not([?svgCard])` selector was silently ignored by Cytoscape (`:not()` isn't in its grammar). Replaced with an explicit `data(isCard = 0)` flag.
+- **Cytoscape console noise silenced.** Deprecated `label` style key swapped to `content` on edges; `wheelSensitivity` warning disabled (0.5 stays because it's better on trackpads).
+
+### Testing
+
+- 264 tests, 0 failures. A dedicated `webviewCards.test.ts` extracts and executes the inline script from `webview/preview.html` in a mock browser env, exercising `cardServiceFor`, `buildServiceCard`, and `buildElements` on realistic graph data. A guard-rail test asserts every value returned by `cardServiceFor` is mapped in `SERVICE_GRADIENT` so silent fallbacks are impossible. Another regression test asserts CloudFormation intrinsic-tag parsing never re-emits `TAG_RESOLVE_FAILED`.
+
+### Tooling
+
+- `npm run package` falls back to global `vsce` when the local `@vscode/vsce` is evicted by macOS iCloud sync (which happens whenever the repo lives under `~/Documents/`). Documented in `install.md`.
+
+---
+
+## [0.4.0] — 2026-06-06
+
+### Added
+
+**Graph preview — Official AWS service icons on Task nodes**
+
+Task nodes that target an AWS service now render as visual cards — identical in spirit to the AWS Step Functions console, with several improvements:
+
+- **36 official AWS Architecture Icons** embedded in the extension (Lambda, DynamoDB, SNS, SQS, S3, Bedrock, EventBridge, SageMaker, ECS, Batch, Glue, Athena, Kinesis, Firehose, EMR, CodeBuild, Textract, Rekognition, Comprehend, Polly, Transcribe, Translate, Lex, AppSync, API Gateway, CloudFormation, Systems Manager, Secrets Manager, MediaConvert, IoT, Step Functions, and more).
+- **Card layout**: coloured left accent bar (service colour), 44×44 icon square, subtitle line (`Amazon DynamoDB: PutItem`), and state name in bold.
+- **Service detection**: handles all ARN patterns — `states:::SERVICE:ACTION`, `states:::aws-sdk:SERVICE:ACTION`, direct Lambda ARNs, and nested Step Functions ARNs.
+- **Graceful fallback**: unrecognised services display coloured initials instead of an icon.
+
+**Graph preview — Theme toggle**
+
+A `☀/☾` button in the toolbar switches between dark (`#141414`) and light (`#f5f5f5`) backgrounds. Card SVGs regenerate automatically on theme change. Edge label backgrounds update to match.
+
+**Graph preview — Export improvements**
+
+- PNG export uses a **transparent background** (previously dark).
+- JPEG export uses the **current active theme background** (dark or light).
+- Both exports **refit** the graph before capturing.
+
+---
+
 ## [0.3.1] — 2026-05-29
 
 ### Added

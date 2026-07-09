@@ -28,7 +28,8 @@ webview/vendor-entry.js
 # Misc
 **/*.map
 **/*.ts
-**/*.svg
+# NOTE: **/*.svg is intentionally NOT excluded here — media/aws-icons/*.svg
+# must be included in the VSIX so the webview can load AWS service icons.
 package-lock.json
 .gitignore
 NOTES.md
