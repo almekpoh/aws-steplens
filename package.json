@@ -131,7 +131,7 @@
     "cytoscape": "^3.33.2",
     "cytoscape-dagre": "^2.5.0",
     "dagre": "^0.8.5",
-    "esbuild": "^0.25.0",
+    "esbuild": "^0.28.1",
     "eslint": "^9.0.0",
     "ts-node": "^10.9.2",
     "typescript": "^5.9.3",
