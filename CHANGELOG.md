@@ -78,6 +78,31 @@ A `☀/☾` button in the toolbar switches between dark (`#141414`) and light (`
 
 ---
 
+## [0.3.1] — 2026-05-29
+
+### Added
+
+**Graph preview — theme toggle**
+
+A `☀` button in the toolbar switches the graph background between dark (`#141414`) and light (`#f5f5f5`). The icon becomes `☾` in light mode. Available in both the VS Code preview and the HTML export.
+
+**Graph preview — HTML interactive export**
+
+A new `⬇ Export ▾` dropdown in the toolbar replaces the individual PNG and JPEG buttons and adds a third format:
+
+- **PNG** — transparent background, graph refitted before capture (scale ×2)
+- **JPEG** — uses the current theme background (dark or light depending on the `☀/☾` toggle), graph refitted before capture (scale ×2)
+- **HTML** — fully self-contained interactive file: opens in any browser, supports zoom, pan, tab navigation (Parallel / Map sub-graphs), Fit button, and the `☀/☾` theme toggle — no internet connection required (Cytoscape + dagre bundled inline)
+
+### Changed
+
+- Export buttons consolidated into a single `⬇ Export ▾` dropdown to reduce toolbar clutter
+- PNG export no longer forces a dark background — background is now transparent
+- JPEG export background follows the active theme instead of being hardcoded dark
+- Both PNG and JPEG exports refit the graph to its full extent before capturing, so the exported image always shows the complete state machine regardless of current zoom/pan
+
+---
+
 ## [0.3.0] — 2026-05-14
 
 ### Added

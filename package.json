@@ -1,7 +1,7 @@
 {
   "name": "aws-steplens",
   "displayName": "AWS StepLens",
-  "description": "Visualize, navigate and lint AWS Step Functions definitions (ASL YAML/JSON + JSONata). Interactive graph preview, real-time linter with 50+ rules, nested Parallel/Map sub-graph exploration, and PNG/JPEG export.",
+  "description": "Visualize, navigate and lint AWS Step Functions definitions (ASL YAML/JSON + JSONata). Interactive graph preview, real-time linter with 50+ rules, nested Parallel/Map sub-graph exploration, and PNG/JPEG/HTML export.",
   "version": "0.4.1",
   "galleryBanner": {
     "color": "#1a1a2e",

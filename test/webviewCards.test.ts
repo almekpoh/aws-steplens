@@ -63,6 +63,8 @@ function loadProbe(): Probe {
     getElementById: () => stubEl(),
     querySelectorAll: () => [],
     querySelector: () => null,
+    addEventListener: () => {},
+    removeEventListener: () => {},
   };
   (globalThis as any).getComputedStyle = () => ({ backgroundColor: 'rgb(20,20,20)' });
   (globalThis as any).location = { search: '' };

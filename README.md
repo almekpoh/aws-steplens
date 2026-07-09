@@ -24,7 +24,8 @@ Open a live graph of your state machine with a single click on the ⊤ toolbar i
 - **← Main** back button appears automatically when browsing a sub-graph.
 - **⊡ Fit / − / +** buttons recenter or step-zoom the graph.
 - **▦ Catalog** button opens a full-page overlay showing every card variant (one per AWS service + one per flow-control state + badge variants). Useful for exploring what the extension can render.
-- **Export** the current view as PNG or JPEG.
+- **☀ / ☾** theme toggle — switch the graph background between dark and light; affects the live preview, JPEG export, and HTML export.
+- **⬇ Export ▾** dropdown — export the current view as PNG, JPEG, or a fully self-contained interactive HTML file.
 - **Design Reference sidebar** (right, 270 px) — gradient swatches per service family, badge legend, edge-type legend. Toggle via the `☰ Legend` button.
 
 ### Node annotations (badge overlay)
@@ -40,6 +41,18 @@ Open a live graph of your state machine with a single click on the ⊤ toolbar i
 | Red card + `⚠ Catch · <Error>` subtitle | Fail state with declared Error/Cause |
 | Golden halo around the card | State at cursor position |
 | Red dashed border + `(not found)` | Broken reference — a `Next`, `Default`, `Catch`, or `Choices` target that does not exist in `States` |
+
+### Export
+
+The `⬇ Export ▾` dropdown in the graph toolbar offers three formats:
+
+| Format | Background | Interactive |
+|--------|-----------|-------------|
+| **PNG** | Transparent | No — static image (×2 scale) |
+| **JPEG** | Current theme (dark or light) | No — static image (×2 scale) |
+| **HTML** | Current theme (dark or light) | Yes — zoom, pan, sub-graph tabs, theme toggle |
+
+The graph is automatically refitted before PNG and JPEG capture. The HTML export is a fully self-contained file (Cytoscape and dagre bundled inline) — no internet connection required. Toggle `☀/☾` before exporting JPEG or HTML to choose the background.
 
 ### Language features
 

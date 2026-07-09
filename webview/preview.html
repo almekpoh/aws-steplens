@@ -50,6 +50,22 @@
     }
     .export-btn:hover { color: #ccc; border-color: #555; background: #222; }
 
+    /* ── Export dropdown ─────────────────────────────────────────────────── */
+    #export-wrap { position: relative; }
+    #export-menu {
+      display: none; position: fixed;
+      background: #1c1c1c; border: 1px solid #333; border-radius: 4px;
+      min-width: 140px; z-index: 100; overflow: hidden;
+    }
+    #export-menu.open { display: block; }
+    .export-item {
+      display: block; width: 100%; background: none; border: none;
+      color: #aaa; cursor: pointer; font-size: 11px; font-family: inherit;
+      padding: 7px 12px; text-align: left; white-space: nowrap; transition: background 0.1s;
+    }
+    .export-item:hover { background: #2a2a2a; color: #eee; }
+    .export-item-sub { font-size: 9px; color: #555; margin-left: 4px; }
+
     /* ── Workspace: graph pane + right sidebar ───────────────────────────── */
     #workspace { flex: 1; display: flex; min-height: 0; overflow: hidden; }
     #graph-area { flex: 1; position: relative; overflow: hidden; min-width: 0; }
@@ -123,8 +139,14 @@
     <button class="export-btn" id="btn-zoom-in" title="Zoom in (Cmd/Ctrl + +)">+</button>
     <button class="export-btn" id="btn-fit" title="Fit to view (Cmd/Ctrl + 0)">⊡ Fit</button>
     <button class="export-btn" id="btn-theme" title="Toggle light/dark background">☀</button>
-    <button class="export-btn" id="btn-png">⬇ PNG</button>
-    <button class="export-btn" id="btn-jpg">⬇ JPEG</button>
+    <div id="export-wrap">
+      <button class="export-btn" id="btn-export">⬇ Export ▾</button>
+      <div id="export-menu">
+        <button class="export-item" id="btn-png">PNG <span class="export-item-sub">transparent bg</span></button>
+        <button class="export-item" id="btn-jpg">JPEG <span class="export-item-sub">current bg</span></button>
+        <button class="export-item" id="btn-html">HTML <span class="export-item-sub">interactive</span></button>
+      </div>
+    </div>
   </div>
 
   <div id="workspace">
@@ -1021,8 +1043,20 @@
       });
     });
 
+    // ── Export dropdown ───────────────────────────────────────────────────
+    const exportMenu = document.getElementById('export-menu');
+    document.getElementById('btn-export').addEventListener('click', e => {
+      e.stopPropagation();
+      const rect = e.currentTarget.getBoundingClientRect();
+      exportMenu.style.top  = (rect.bottom + 4) + 'px';
+      exportMenu.style.right = (window.innerWidth - rect.right) + 'px';
+      exportMenu.classList.toggle('open');
+    });
+    document.addEventListener('click', () => exportMenu.classList.remove('open'));
+
     // ── Export ────────────────────────────────────────────────────────────
     document.getElementById('btn-png').addEventListener('click', () => {
+      exportMenu.classList.remove('open');
       const cy = instances[activeTabId];
       if (!cy) return;
       cy.fit(undefined, 40);
@@ -1033,6 +1067,7 @@
     });
 
     document.getElementById('btn-jpg').addEventListener('click', () => {
+      exportMenu.classList.remove('open');
       const cy = instances[activeTabId];
       if (!cy) return;
       cy.fit(undefined, 40);
@@ -1041,6 +1076,11 @@
         type: 'export', format: 'jpeg',
         data: cy.jpg({ output: 'base64uri', bg: bgColor, scale: 2, quality: 0.92 }),
       });
+    });
+
+    document.getElementById('btn-html').addEventListener('click', () => {
+      exportMenu.classList.remove('open');
+      vscode.postMessage({ type: 'exportHtml' });
     });
 
     // ── Incoming messages (highlight + live update) ───────────────────────
